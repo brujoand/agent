@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# agent - the CLI for agentic work.
+#
+# Owns credentials (mints brujoand-agent App installation tokens), knows which
+# repos the agent can reach, manages worktrees, and wraps `lab` for agentic use.
+# The dependency points one way: agent -> lab, never back.
+#
+# This launcher exists so that `agent` is a single executable on PATH and so the
+# venv interpreter is resolved from THIS file's location, never from PATH or the
+# caller's cwd. That matters because git spawns `agent git-credential` as a bare
+# subprocess with a minimal environment, from inside whatever repo it is
+# authenticating -- no mise shims, possibly no HOME-derived PATH entries.
+
+script_dir="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+_VENV_PYTHON="${script_dir}/.venv/bin/python"
+
+# Fail loudly, not silently. `lab/lab` quietly falls back to its bash dispatcher
+# when its venv is missing, which makes its Python modules vanish without an
+# error -- a footgun worth not reproducing here.
+if [[ ! -x ${_VENV_PYTHON} ]]; then
+  echo "agent: no venv at ${_VENV_PYTHON}" >&2
+  echo "  Run ${script_dir}/bootstrap.sh to provision it." >&2
+  exit 1
+fi
+
+exec "${_VENV_PYTHON}" -m agentcli "$@"

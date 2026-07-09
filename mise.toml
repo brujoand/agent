@@ -1,0 +1,11 @@
+# Tools for the agent CLI itself -- deliberately just python + uv.
+#
+# The cluster toolchain (kubectl, talosctl, helm, ...) is pinned by
+# gitops-homelab's own mise.toml and installed by `agent lab install`. This repo
+# bootstraps before that checkout exists, so it pins only what agentcli needs.
+#
+# mise itself is installed independently (`curl mise.run | sh`), which is what
+# keeps this acyclic: agent needs mise, mise needs nothing.
+[tools]
+python = "3.14.3"
+uv = "0.11.26"

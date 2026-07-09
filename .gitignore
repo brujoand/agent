@@ -1,7 +1,21 @@
-# pull.sh clones sibling repos into this directory. Ignore everything, then
+# `agent pull` clones sibling repos into this directory. Ignore everything, then
 # re-include the files this repo actually owns.
 /*
 !/.gitignore
+!/.python-version
 !/README.md
-!/pull.sh
+!/agent
+!/agentcli/
+!/bootstrap.sh
 !/install.sh
+!/mise.toml
+!/pull.sh
+!/pyproject.toml
+!/tests/
+!/uv.lock
+
+# Python build artefacts inside the re-included dirs.
+__pycache__/
+*.pyc
+/.venv/
+/.pytest_cache/

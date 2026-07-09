@@ -1,0 +1,44 @@
+[project]
+name = "agentcli"
+version = "0.1.0"
+description = "Agent CLI: credentials, repos, worktrees, and a lab wrapper"
+requires-python = ">=3.14"
+dependencies = [
+  "typer>=0.15.0",
+  "httpx>=0.28.0",
+  "cryptography>=42.0",
+]
+
+[project.scripts]
+agentcli = "agentcli.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = [
+  "pytest>=8.0",
+  "pytest-httpx>=0.35",
+  "ruff>=0.9.0",
+]
+
+[tool.ruff]
+target-version = "py314"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "S"]
+# S101 (assert): pytest uses asserts. S603/S607 (subprocess): all calls use
+# fixed argv lists, never shell=True -- flagged but reviewed safe.
+ignore = ["E501", "B008", "SIM108", "S603", "S607"]
+
+[tool.ruff.lint.per-file-ignores]
+# S101 (assert): pytest. S105: test fixtures name fake tokens/URLs, not secrets.
+"tests/**" = ["S101", "S105"]
+
+[tool.ruff.format]
+quote-style = "double"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
