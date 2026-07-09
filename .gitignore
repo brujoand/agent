@@ -1,0 +1,6 @@
+# pull.sh clones sibling repos into this directory. Ignore everything, then
+# re-include the files this repo actually owns.
+/*
+!/.gitignore
+!/README.md
+!/pull.sh
