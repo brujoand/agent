@@ -68,7 +68,10 @@ def _check_helpers() -> bool:
     expected = git.helper_spec()
     stale: list[str] = []
 
-    checkouts = [repo_path(name) for name in workspace.managed_repos()]
+    # The agent root itself is easy to forget: `agent pull` skips cloning it, and
+    # managed_repos() only walks its subdirectories. It still has to fetch and
+    # push like any other checkout.
+    checkouts = [agent_root(), *(repo_path(name) for name in workspace.managed_repos())]
     legacy_primary = Path.home() / "src" / "gitops-homelab"
     if git.is_checkout(legacy_primary):
         checkouts.append(legacy_primary)

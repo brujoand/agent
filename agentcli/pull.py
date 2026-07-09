@@ -48,6 +48,10 @@ def run() -> int:
     for url in urls:
         name = repos.name(url)
         if self_slug and repos.slug(url) == self_slug:
+            # Never clone ourselves (it would nest agent/ inside agent/), but DO
+            # keep our own credential helper current: this checkout needs to
+            # fetch and push like any other, and nothing else would fix it.
+            git.set_github_helper(root)
             print(f"==> skipping {name} (this repo)")
             continue
 
