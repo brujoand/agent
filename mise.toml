@@ -1,0 +1,15 @@
+# Tools for the agent CLI itself -- deliberately just python + uv.
+#
+# Python is pinned to 3.12 to match the CI runner image (Ubuntu 24.04 ships
+# python3.12): agentcli is baked into that image, so dev and container must
+# agree. lab/labcli keeps its own 3.14 venv and is unaffected.
+#
+# The cluster toolchain (kubectl, talosctl, helm, ...) is pinned by
+# gitops-homelab's own mise.toml and installed by `agent lab install`. This repo
+# bootstraps before that checkout exists, so it pins only what agentcli needs.
+#
+# mise itself is installed independently (`curl mise.run | sh`), which is what
+# keeps this acyclic: agent needs mise, mise needs nothing.
+[tools]
+python = "3.12.13"
+uv = "0.11.26"
