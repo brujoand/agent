@@ -4,7 +4,7 @@ import os
 import subprocess
 from pathlib import Path
 
-from agentcli.config import DEFAULT_REPO, agent_root, repo_path
+from agentcli.config import DEFAULT_REPO, repo_path
 from agentcli.errors import AgentConfigError
 
 _MISE = Path.home() / ".local" / "bin" / "mise"
@@ -75,7 +75,3 @@ def lab_binary(repo: str = DEFAULT_REPO) -> Path:
             f"lab not found at {binary} -- run `agent pull && agent lab install`"
         )
     return binary
-
-
-def agent_root_str() -> str:
-    return str(agent_root())

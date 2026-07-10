@@ -91,19 +91,25 @@ def test_cache_dir_defaults_to_home(monkeypatch, tmp_path):
     assert config.cache_dir() == tmp_path / ".cache" / "agent"
 
 
-def test_agent_root_is_not_derived_from_module_location(monkeypatch, tmp_path):
+def test_src_root_is_not_derived_from_module_location(monkeypatch, tmp_path):
     """The installed CLI is a copy under site-packages; __file__ must not define the root.
 
     Deriving it from __file__ made `agent doctor` report a repo called
     `site-packages`, and would have had `agent pull` clone into a python package
     directory.
     """
-    monkeypatch.delenv("AGENT_ROOT", raising=False)
+    monkeypatch.delenv("AGENT_SRC_ROOT", raising=False)
     monkeypatch.setattr(config.Path, "home", classmethod(lambda cls: tmp_path))
-    assert config.agent_root() == tmp_path / "src" / "agent"
-    assert "site-packages" not in str(config.agent_root())
+    assert config.src_root() == tmp_path / "src"
+    assert "site-packages" not in str(config.src_root())
 
 
-def test_agent_root_env_override(monkeypatch, tmp_path):
-    monkeypatch.setenv("AGENT_ROOT", str(tmp_path / "elsewhere"))
-    assert config.agent_root() == tmp_path / "elsewhere"
+def test_src_root_env_override(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_SRC_ROOT", str(tmp_path / "elsewhere"))
+    assert config.src_root() == tmp_path / "elsewhere"
+
+
+def test_repo_path_is_a_sibling_of_the_agent_checkout(monkeypatch, tmp_path):
+    monkeypatch.setenv("AGENT_SRC_ROOT", str(tmp_path))
+    assert config.repo_path("gitops-homelab") == tmp_path / "gitops-homelab"
+    assert config.repo_path("agent") == tmp_path / "agent"

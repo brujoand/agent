@@ -67,6 +67,19 @@ def current_branch(repo: Path) -> str:
     return run(["-C", str(repo), "rev-parse", "--abbrev-ref", "HEAD"]).stdout.strip()
 
 
+def default_branch(repo: Path) -> str:
+    """The repo's default branch name, from `origin/HEAD`.
+
+    Not every repo uses `main`: of the eleven the App can reach, four (dotfiles,
+    home-assistant, sbp, ...) still use `master`. Hardcoding `main` made
+    `agent workspace create --repo dotfiles` fail with `invalid reference:
+    origin/main`. Falls back to `main` when origin/HEAD is unset.
+    """
+    result = run(["-C", str(repo), "symbolic-ref", "-q", "refs/remotes/origin/HEAD"], check=False)
+    ref = result.stdout.strip()
+    return ref.removeprefix("refs/remotes/origin/") if ref else "main"
+
+
 def is_dirty(repo: Path) -> bool:
     return bool(run(["-C", str(repo), "status", "--porcelain"]).stdout.strip())
 

@@ -31,29 +31,37 @@ def cache_dir() -> Path:
     return (Path(base) if base else Path.home() / ".cache") / "agent"
 
 
-# Where the agent root lives. Not derived from __file__: the installed CLI is an
-# isolated copy under ~/.local/share/uv/tools/..., so `__file__` would resolve to
-# its site-packages rather than the checkout, and `agent pull` would try to clone
-# repos into a python package directory. Not derived from cwd either -- git spawns
-# the credential helper from inside whatever repo it is authenticating.
+# Where the checkouts live. `agent pull` clones every reachable repo here, as
+# SIBLINGS -- the agent repo itself is just one of them.
 #
-# AGENT_ROOT overrides it; the checkout's ./agent launcher sets it to itself, so
-# running from source always acts on that tree.
+# They used to be nested inside the agent checkout, which forced an inverted
+# .gitignore (a gitleaks blind spot at the repo root), an inverted .dockerignore
+# (the build context was 111M of unrelated checkouts), a self-skip in `pull`, and
+# a special case in `doctor`. `git clean -xffd` in the agent repo would also have
+# taken every sibling with it, unpushed work included.
+#
+# Not derived from __file__: the installed CLI is an isolated copy under
+# ~/.local/share/uv/tools/..., so `__file__` resolves to its site-packages. Not
+# derived from cwd either -- git spawns the credential helper from inside whatever
+# repo it is authenticating.
+#
+# AGENT_SRC_ROOT overrides it; the checkout's ./agent launcher sets it to its own
+# parent, so running from source acts on the tree that source lives in.
 
 
-def default_agent_root() -> Path:
+def default_src_root() -> Path:
     """Resolved at call time, not import time: HOME differs between the box and the image."""
-    return Path.home() / "src" / "agent"
+    return Path.home() / "src"
 
 
-def agent_root() -> Path:
-    """The directory holding the agent checkout -- and every repo `agent pull` clones."""
-    override = os.environ.get("AGENT_ROOT")
-    return Path(override).expanduser().resolve() if override else default_agent_root()
+def src_root() -> Path:
+    """The directory holding every managed checkout, the agent repo included."""
+    override = os.environ.get("AGENT_SRC_ROOT")
+    return Path(override).expanduser().resolve() if override else default_src_root()
 
 
 def repo_path(repo: str) -> Path:
-    return agent_root() / repo
+    return src_root() / repo
 
 
 def worktree_base(repo: str) -> Path:
