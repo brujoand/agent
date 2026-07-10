@@ -1,0 +1,81 @@
+---
+# Mirrors gitops-homelab's hooks, minus the ones that only make sense there
+# (kubeconform, helm, kustomize, ansible, renovate, prometheus). Same repos and
+# revs, so the two stay in step -- Renovate bumps them by the same rules.
+default_install_hook_types: [pre-commit]
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: mixed-line-ending
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: check-yaml
+      - id: check-toml
+
+  - repo: https://github.com/Lucas-C/pre-commit-hooks
+    rev: v1.5.5
+    hooks:
+      - id: remove-crlf
+      - id: remove-tabs
+
+  - repo: https://github.com/sirosen/fix-smartquotes
+    rev: 0.2.0
+    hooks:
+      - id: fix-smartquotes
+
+  # This repo mints GitHub App installation tokens and handles a private key.
+  # gitleaks is the hook that matters most here.
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.28.0
+    hooks:
+      - id: gitleaks
+
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+
+  - repo: https://github.com/scop/pre-commit-shfmt
+    rev: v3.12.0-1
+    hooks:
+      - id: shfmt
+        # -i 2: 2-space indent, -ci: indent case bodies, -s: simplify, -w: write
+        args: [-i, '2', -ci, -s, -w]
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.10
+    hooks:
+      - id: ruff
+        args: [--fix]
+        files: ^(agentcli|tests)/.*\.py$
+      - id: ruff-format
+        files: ^(agentcli|tests)/.*\.py$
+
+  - repo: local
+    hooks:
+      - id: bash-syntax
+        name: Check bash syntax (bash -n)
+        entry: bash -n
+        language: system
+        files: ^.*\.sh$|^agent$
+
+      - id: bash-script-validator
+        name: Validate Bash Script Standards
+        entry: ./.github/validators/validate_bash_scripts.sh
+        language: script
+        files: ^.*\.sh$|^agent$
+        pass_filenames: true
+
+      # agentcli must run on the CI runner image, whose python3 is 3.12 (Ubuntu
+      # 24.04). Nothing else catches a 3.13+/3.14-only construct until the image
+      # build fails -- or worse, until a workflow does.
+      - id: python-min-version
+        name: Parse agentcli under the minimum supported Python (3.12)
+        entry: python3 -c "import ast,sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]"
+        language: system
+        files: ^(agentcli|tests)/.*\.py$
+        pass_filenames: true

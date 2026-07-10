@@ -1,0 +1,67 @@
+---
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          # Must match the floor in pyproject.toml: the python-min-version hook
+          # parses agentcli with whatever `python3` is here.
+          python-version: '3.12'
+
+      - name: Cache pre-commit environments
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+          restore-keys: |
+            pre-commit-${{ runner.os }}-
+
+      - name: Install pre-commit
+        run: pip install pre-commit
+
+      # On a PR, lint only what changed; on a push to main, lint everything.
+      - name: Run pre-commit
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            pre-commit run --from-ref origin/main --to-ref HEAD
+          else
+            pre-commit run --all-files
+          fi
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Install mise
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
+
+      # mise pins python + uv; uv builds the venv from uv.lock. Running the suite
+      # on the pinned interpreter is what proves agentcli works on the version the
+      # CI runner image ships.
+      - name: Run tests
+        run: mise exec -- uv run pytest -q
+
+      - name: Lint
+        run: |
+          mise exec -- uv run ruff check .
+          mise exec -- uv run ruff format --check .
