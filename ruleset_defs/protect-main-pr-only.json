@@ -22,5 +22,8 @@
         "allowed_merge_methods": ["merge", "squash", "rebase"]
       }
     }
+  ],
+  "bypass_actors": [
+    { "actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "exempt" }
   ]
 }

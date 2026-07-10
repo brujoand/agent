@@ -16,6 +16,15 @@
 # The PAT CANNOT list installations or read /repos/{}/installation (those need a
 # token authorized to the App itself), so the installation id cannot be
 # discovered at runtime -- hence the constant below.
+#
+# The ruleset exempts RepositoryRole 5 (admin) via bypass_actors, so the human
+# admin can still push directly. This does NOT weaken the constraint on the
+# agent: brujoand-agent[bot] is not an admin, so the exemption never applies to
+# it -- it still cannot merge its own PRs. Admin (id 5) is a GitHub built-in and
+# identical on every repo, so it ports cleanly. gitops-homelab additionally
+# exempts an Integration (Renovate) actor, but that id is per-installation and
+# does not port, so it is deliberately a gitops-homelab-only exception, not part
+# of the shared definition here.
 
 set -euo pipefail
 
