@@ -47,11 +47,22 @@ github.com is reached over HTTPS as the App, everywhere — there is no SSH key
 and no deploy key. Every clone gets
 
 ```
-credential.https://github.com.helper = !~/src/agent/agent git-credential
+credential.https://github.com.helper = !~/.local/bin/agent git-credential
 ```
 
 which mints a fresh installation token on demand (cached until shortly before it
-expires). Note `credential.helper` is **multi-valued**: to test one in isolation
+expires).
+
+It points at the **installed** agent — an isolated copy that `bootstrap.sh` puts
+in `~/.local/bin` with `uv tool install` — never at `./agent` in the checkout.
+This CLI is its own credential helper for the repo that contains it, so a helper
+living in tracked files is a bootstrap trap: `git checkout` to any commit
+predating the CLI deletes both the launcher and `agentcli/`, git then has no way
+to authenticate, and `git pull` cannot fetch the commits that would restore it.
+(If you ever land there: `git merge --ff-only origin/main` needs no auth.)
+
+The checkout keeps an editable `.venv`, so `./agent` runs live source for
+development while `agent` on PATH stays stable. Note `credential.helper` is **multi-valued**: to test one in isolation
 you must first reset the list with `-c credential.helper=`, or the helper already
 in `.git/config` will quietly authenticate for you. There is no ambient
 credential store here, so `agent doctor` treats a stale helper as a failure.

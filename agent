@@ -26,4 +26,9 @@ if [[ ! -x ${_VENV_PYTHON} ]]; then
   exit 1
 fi
 
+# Running from a checkout means acting on THAT checkout, whatever `agent` on PATH
+# would default to. The installed copy (~/.local/bin/agent) has no such context
+# and falls back to config.DEFAULT_AGENT_ROOT.
+export AGENT_ROOT="${AGENT_ROOT:-${script_dir}}"
+
 exec "${_VENV_PYTHON}" -m agentcli "$@"

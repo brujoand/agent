@@ -10,7 +10,7 @@ from agentcli import git, pull, repos
 @pytest.fixture
 def fake_root(tmp_path, monkeypatch):
     monkeypatch.setattr(pull, "agent_root", lambda: tmp_path)
-    monkeypatch.setattr(git, "agent_root", lambda: tmp_path)
+    monkeypatch.setattr(git, "INSTALLED_AGENT", tmp_path / ".local" / "bin" / "agent")
     return tmp_path
 
 
@@ -55,9 +55,18 @@ def test_sync_one_clones_when_absent(fake_root, monkeypatch):
     assert cloned == [("https://github.com/brujoand/new.git", dest)]
 
 
-def test_helper_spec_is_absolute_path_to_launcher(fake_root):
-    # git runs a `!`-prefixed helper as a shell command, from inside an arbitrary
-    # repo with a minimal environment. A bare `agent` would depend on PATH.
+def test_helper_spec_points_at_the_installed_agent_not_the_checkout(fake_root):
+    """The helper must survive `git checkout` of a commit predating the CLI.
+
+    If it pointed into the checkout, switching to such a commit would delete both
+    the launcher and agentcli/, leaving git with no way to authenticate (there is
+    no ambient credential store) -- so `git pull` could not fetch the commits that
+    would restore it.
+    """
     spec = git.helper_spec()
-    assert spec == f"!{fake_root / 'agent'} git-credential"
+    assert spec == f"!{fake_root / '.local' / 'bin' / 'agent'} git-credential"
+    # Absolute: git spawns it from inside an arbitrary repo with a minimal env,
+    # so a bare `agent` would depend on PATH.
     assert spec.startswith("!/")
+    # And it must not name the checkout's own launcher.
+    assert not spec.startswith(f"!{fake_root / 'agent'} ")

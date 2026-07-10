@@ -31,12 +31,27 @@ echo "==> trusting and installing pinned tools (python, uv)"
 
 echo "==> building the agent venv (uv sync)"
 # Run uv through mise so the pinned uv/python are used even when the caller's
-# PATH has neither (e.g. a fresh ansible shell).
+# PATH has neither (e.g. a fresh ansible shell). This venv is editable, so
+# ./agent in the checkout always runs live source -- the development path.
 (cd "$script_dir" && "$_MISE" exec -- uv sync)
 
-echo "==> symlinking agent into ${_BIN_DIR}"
+# The INSTALLED agent: an isolated copy, immune to what is checked out here.
+#
+# This CLI is its own git credential helper for the very repo that contains it.
+# If ~/.local/bin/agent pointed into the checkout, `git checkout` to any commit
+# predating the CLI would delete both the launcher and agentcli/ -- and git would
+# then have no way to authenticate (there is no ambient credential store), so
+# `git pull` could not fetch the commits that would restore it. A self-referential
+# bootstrap trap. `uv tool install` copies the package into its own environment,
+# so the helper keeps working no matter what this working tree looks like.
+#
+# Pinned to .python-version, the same interpreter mise.toml and the CI runner
+# image use, so the installed copy cannot drift onto a newer Python whose syntax
+# the image would reject.
+echo "==> installing the agent CLI into ${_BIN_DIR} (isolated copy)"
 mkdir -p "$_BIN_DIR"
-ln -sfn "${script_dir}/agent" "${_BIN_DIR}/agent"
+_PYTHON_VERSION="$(<"${script_dir}/.python-version")"
+(cd "$script_dir" && "$_MISE" exec -- uv tool install --force --python "$_PYTHON_VERSION" .)
 
 echo ""
 echo "bootstrap.sh: agent ready at ${_BIN_DIR}/agent"
