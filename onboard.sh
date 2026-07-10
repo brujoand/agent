@@ -9,10 +9,15 @@
 # not sit inside the boundary -- it runs before the agent exists on a repo, and
 # it must keep working even if the agent install is broken.
 #
+# Onboarding does three things: install the App, apply the branch-protection
+# ruleset, and (public repos only) require manual approval for external fork PRs
+# so a fork cannot reach CI -- and any agent secret wired into it -- unattended.
+#
 # What the human's PAT can and cannot do (all verified against the live API):
 #   * install the App on a repo:  PUT  /user/installations/{id}/repositories/{repo_id}
 #   * remove it:                  DELETE  (same path)
 #   * write the ruleset:          POST/PUT /repos/{slug}/rulesets
+#   * set fork-PR approval:       PUT  /repos/{slug}/actions/permissions/fork-pr-contributor-approval
 # The PAT CANNOT list installations or read /repos/{}/installation (those need a
 # token authorized to the App itself), so the installation id cannot be
 # discovered at runtime -- hence the constant below.
@@ -43,13 +48,24 @@ readonly SCRIPT_DIR
 readonly RULESET_FILE="${SCRIPT_DIR}/ruleset_defs/protect-main-pr-only.json"
 readonly RULESET_NAME="protect-main-pr-only"
 
+# Fork-PR approval policy. `all_external_contributors` = every fork PR from an
+# outside contributor needs manual approval before any workflow runs (GitHub's
+# default, first_time_contributors, auto-runs returning contributors). This is
+# what keeps a fork PR from reaching CI -- and any agent secret wired into it --
+# without a human clicking approve. It applies only to PUBLIC repos; the API 422s
+# on private ones (which cannot be forked externally anyway), so onboarding sets
+# it conditionally on visibility.
+readonly FORK_APPROVAL_POLICY="all_external_contributors"
+
 function usage {
   cat >&2 <<EOF
 usage: onboard.sh [--remove] <owner/repo>
 
-  (default)   install the brujoand-agent App on the repo and apply the
-              ${RULESET_NAME} branch-protection ruleset.
-  --remove    remove the ruleset and detach the repo from the App.
+  (default)   install the brujoand-agent App on the repo, apply the
+              ${RULESET_NAME} branch-protection ruleset, and (public
+              repos) require approval for external fork PRs.
+  --remove    remove the ruleset and detach the repo from the App. The fork-PR
+              approval policy is left in place (a security control, not undone).
 
 Requires a human admin PAT (gh auth). Idempotent: safe to re-run.
 EOF
@@ -116,6 +132,22 @@ function ruleset_remove {
   fi
 }
 
+# fork_policy_harden requires manual approval for external fork PRs, but only on
+# public repos -- the endpoint 422s on private ones. Deliberately NOT undone by
+# --remove: detaching a repo from the agent is no reason to loosen a security
+# control, and reverting to the permissive default would be strictly worse.
+function fork_policy_harden {
+  local slug="$1" visibility
+  visibility="$(gh api "repos/${slug}" --jq '.visibility')"
+  if [[ $visibility != "public" ]]; then
+    report "fork-pr" "n/a (${visibility}; forks need no approval gate)"
+    return 0
+  fi
+  gh api -X PUT "repos/${slug}/actions/permissions/fork-pr-contributor-approval" \
+    -f approval_policy="${FORK_APPROVAL_POLICY}" >/dev/null
+  report "fork-pr" "approval: ${FORK_APPROVAL_POLICY}"
+}
+
 function main {
   local remove=0 slug=""
   while [[ $# -gt 0 ]]; do
@@ -155,6 +187,7 @@ function main {
   else
     app_install "$rid"
     ruleset_apply "$slug"
+    fork_policy_harden "$slug"
   fi
 }
 
