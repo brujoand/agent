@@ -3,7 +3,6 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 
-from agentcli.config import agent_root
 from agentcli.errors import AgentGitError
 
 # The credential-helper string persisted into every clone's .git/config. git runs
@@ -12,9 +11,21 @@ from agentcli.errors import AgentGitError
 # spawns the helper (a minimal environment, from inside an arbitrary repo).
 GITHUB_HELPER_KEY = "credential.https://github.com.helper"
 
+# It points at the INSTALLED agent (an isolated copy under ~/.local/share/uv/tools),
+# never at the launcher inside the checkout. The agent CLI is its own credential
+# helper for the very repo that contains it, so a helper living in tracked files
+# is a bootstrap trap: `git checkout` to any commit predating the CLI deletes both
+# the launcher and agentcli/, git then has no way to authenticate (there is no
+# ambient credential store), and `git pull` cannot fetch the commits that would
+# restore it. The escape is `git merge --ff-only origin/main`, which needs no auth.
+#
+# `bootstrap.sh` installs that copy with `uv tool install`. The checkout keeps its
+# editable .venv, so ./agent still runs live source for development.
+INSTALLED_AGENT = Path.home() / ".local" / "bin" / "agent"
+
 
 def helper_spec() -> str:
-    return f"!{agent_root() / 'agent'} git-credential"
+    return f"!{INSTALLED_AGENT} git-credential"
 
 
 def run(

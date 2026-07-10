@@ -31,13 +31,25 @@ def cache_dir() -> Path:
     return (Path(base) if base else Path.home() / ".cache") / "agent"
 
 
-def agent_root() -> Path:
-    """The directory holding this checkout -- and every repo `agent pull` clones.
+# Where the agent root lives. Not derived from __file__: the installed CLI is an
+# isolated copy under ~/.local/share/uv/tools/..., so `__file__` would resolve to
+# its site-packages rather than the checkout, and `agent pull` would try to clone
+# repos into a python package directory. Not derived from cwd either -- git spawns
+# the credential helper from inside whatever repo it is authenticating.
+#
+# AGENT_ROOT overrides it; the checkout's ./agent launcher sets it to itself, so
+# running from source always acts on that tree.
 
-    Resolved from this file's location, never from cwd: git spawns the credential
-    helper from inside whatever repo it is authenticating.
-    """
-    return Path(__file__).resolve().parent.parent
+
+def default_agent_root() -> Path:
+    """Resolved at call time, not import time: HOME differs between the box and the image."""
+    return Path.home() / "src" / "agent"
+
+
+def agent_root() -> Path:
+    """The directory holding the agent checkout -- and every repo `agent pull` clones."""
+    override = os.environ.get("AGENT_ROOT")
+    return Path(override).expanduser().resolve() if override else default_agent_root()
 
 
 def repo_path(repo: str) -> Path:
