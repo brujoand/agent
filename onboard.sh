@@ -113,14 +113,26 @@ function main {
     case "$1" in
       --remove) remove=1 ;;
       -h | --help) usage ;;
-      -*) echo "onboard.sh: unknown option: $1" >&2; usage ;;
-      *) [[ -n $slug ]] && usage; slug="$1" ;;
+      -*)
+        echo "onboard.sh: unknown option: $1" >&2
+        usage
+        ;;
+      *)
+        [[ -n $slug ]] && usage
+        slug="$1"
+        ;;
     esac
     shift
   done
   [[ -n $slug ]] || usage
-  [[ $slug == */* ]] || { echo "onboard.sh: expected owner/repo, got '${slug}'" >&2; exit 2; }
-  [[ -f $RULESET_FILE ]] || { echo "onboard.sh: missing ruleset file ${RULESET_FILE}" >&2; exit 1; }
+  [[ $slug == */* ]] || {
+    echo "onboard.sh: expected owner/repo, got '${slug}'" >&2
+    exit 2
+  }
+  [[ -f $RULESET_FILE ]] || {
+    echo "onboard.sh: missing ruleset file ${RULESET_FILE}" >&2
+    exit 1
+  }
 
   local rid
   rid="$(repo_id "$slug")"
