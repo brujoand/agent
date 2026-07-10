@@ -2,8 +2,19 @@ from __future__ import annotations
 
 import typer
 
-from agentcli import credential, doctor, github, install, labpass, pull, repos, workspace
+from agentcli import (
+    credential,
+    doctor,
+    github,
+    install,
+    labpass,
+    pull,
+    repos,
+    rulesets,
+    workspace,
+)
 from agentcli.config import DEFAULT_REPO
+from agentcli.errors import AgentError
 
 app = typer.Typer(
     name="agent",
@@ -13,9 +24,15 @@ app = typer.Typer(
 
 github_app = typer.Typer(name="github", help="brujoand-agent App tokens", no_args_is_help=True)
 workspace_app = typer.Typer(name="workspace", help="Session worktrees", no_args_is_help=True)
+setup_app = typer.Typer(
+    name="setup",
+    help="Human-only privileged setup. Refuses to run with agent credentials.",
+    no_args_is_help=True,
+)
 
 app.add_typer(github_app)
 app.add_typer(workspace_app)
+app.add_typer(setup_app)
 
 
 @app.command("git-credential")
@@ -47,6 +64,42 @@ def doctor_command() -> None:
 def github_token(refresh: bool = typer.Option(False, "--refresh", "-f")) -> None:
     """Print a short-lived installation token. Only the token reaches stdout."""
     print(github.token(force=refresh))
+
+
+# Dry-run by default: this rewrites branch protections across the whole fleet, so
+# the destructive path is the one you have to ask for.
+@setup_app.command("rulesets")
+def setup_rulesets(
+    apply: bool = typer.Option(False, "--apply", help="Write. Without it, only diff."),
+    ruleset: str = typer.Option("protect-main-pr-only", "--ruleset"),
+    repo: str = typer.Option("", "--repo", help="One owner/repo instead of the fleet."),
+) -> None:
+    """Converge branch-protection rulesets across every agent-installed repo.
+
+    Human-only: the ruleset applied here is what prevents brujoand-agent[bot]
+    from merging its own PRs, so the agent may not rewrite it.
+    """
+    try:
+        login = rulesets.require_human_token()
+        desired = rulesets.load(ruleset)
+        targets, source = ([repo], "explicit --repo") if repo else rulesets.fleet()
+    except AgentError as err:
+        print(f"ERROR: {err}")
+        raise typer.Exit(1) from err
+
+    mode = "applying" if apply else "dry-run (pass --apply to write)"
+    print(f"{ruleset}: {mode} as {login}")
+    print(f"targets: {len(targets)} repo(s) from {source}\n")
+
+    failures = 0
+    for slug in targets:
+        try:
+            outcome = rulesets.apply_to(slug, desired, dry_run=not apply)
+        except AgentError as err:
+            outcome, failures = f"ERROR: {err}", failures + 1
+        print(f"  {slug:<45} {outcome}")
+
+    raise typer.Exit(1 if failures else 0)
 
 
 # `lab` is one command, not a Typer sub-app: a sub-app would try to resolve

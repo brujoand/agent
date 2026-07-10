@@ -17,6 +17,11 @@ GITHUB_API = "https://api.github.com"
 BOT_NAME = "brujoand-agent[bot]"
 BOT_EMAIL = "300433439+brujoand-agent[bot]@users.noreply.github.com"
 
+# The unprivileged OS user Claude Code runs as, and the only account holding App
+# credentials. Human-only commands ask *it* which repos the App reaches rather
+# than reading its secrets (see rulesets.fleet).
+AGENT_USER = os.environ.get("AGENT_USER", "claude")
+
 # Interactive Claude sessions record their active worktree here, keyed by session
 # id, so the shell statusline can surface it: the Bash tool resets cwd to the
 # primary checkout on every call, so the session cannot infer it from cwd.
