@@ -1,0 +1,16 @@
+# This repo is the agent ROOT: `agent pull` clones every reachable repo as a
+# sibling directory here, and each carries its own .git and venvs. Without an
+# allowlist the build context is hundreds of megabytes of unrelated checkouts.
+#
+# Deny everything, then re-include exactly what the Dockerfile COPYs.
+*
+!agent
+!agentcli/
+!issue_agent/
+!pyproject.toml
+!README.md
+
+# Re-included dirs still drag these in.
+**/__pycache__/
+**/*.pyc
+**/.venv/
