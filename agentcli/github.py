@@ -50,7 +50,7 @@ def _load_pem(private_key_b64: str) -> bytes:
         decoded = base64.b64decode(raw, validate=True)
         if decoded.lstrip().startswith(b"-----BEGIN"):
             return decoded
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         pass
 
     if raw.lstrip().startswith(b"-----BEGIN"):
@@ -134,7 +134,7 @@ def mint(creds: AppCreds | None = None) -> tuple[str, int]:
 def _read_cache() -> str | None:
     try:
         data = json.loads(_cache_file().read_text())
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return None
     token = data.get("token")
     expires_at = data.get("expires_at", 0)
@@ -174,7 +174,7 @@ def token_expires_in() -> int:
     """Seconds of life left on the cached token, or 0 if there is none."""
     try:
         data = json.loads(_cache_file().read_text())
-    except OSError, json.JSONDecodeError:
+    except (OSError, json.JSONDecodeError):
         return 0
     return max(0, int(data.get("expires_at", 0) - time.time()))
 
