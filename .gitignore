@@ -6,10 +6,13 @@
 !/.gitignore
 !/.pre-commit-config.yaml
 !/.python-version
+!/Dockerfile
+!/.dockerignore
 !/README.md
 !/agent
 !/agentcli/
 !/bootstrap.sh
+!/issue_agent/
 !/mise.toml
 !/pyproject.toml
 !/tests/
