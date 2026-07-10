@@ -79,7 +79,7 @@ def workspace_create(
     branch: str = typer.Argument(..., help="<type>/<slug>, e.g. feat/my-change"),
     repo: str = typer.Option(DEFAULT_REPO, "--repo"),
 ) -> None:
-    """Branch off a freshly-fetched origin/main into a new worktree. Prints only its path."""
+    """Branch off the repo's freshly-fetched default branch. Prints only its path."""
     print(workspace.create(branch, repo))
 
 

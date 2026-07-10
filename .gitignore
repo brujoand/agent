@@ -1,25 +1,6 @@
-# `agent pull` clones sibling repos into this directory. Ignore everything, then
-# re-include the files this repo actually owns.
-/*
-!/.editorconfig
-!/.github/
-!/.gitignore
-!/.pre-commit-config.yaml
-!/.python-version
-!/Dockerfile
-!/.dockerignore
-!/README.md
-!/agent
-!/agentcli/
-!/bootstrap.sh
-!/issue_agent/
-!/mise.toml
-!/pyproject.toml
-!/tests/
-!/uv.lock
-
-# Python build artefacts inside the re-included dirs.
+# Python build artefacts.
 __pycache__/
 *.pyc
 /.venv/
 /.pytest_cache/
+/.ruff_cache/

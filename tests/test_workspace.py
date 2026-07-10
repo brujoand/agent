@@ -93,3 +93,24 @@ def test_prune_is_noop_without_pointer_dir(monkeypatch, tmp_path):
 
 def test_age_seconds_none_for_non_worktree(tmp_path):
     assert workspace.age_seconds(tmp_path) is None
+
+
+def test_default_branch_reads_origin_head(monkeypatch, tmp_path):
+    """Four of the eleven managed repos use `master`, not `main`."""
+    monkeypatch.setattr(
+        workspace.git,
+        "run",
+        lambda args, cwd=None, check=True: type(
+            "R", (), {"stdout": "refs/remotes/origin/master\n", "returncode": 0}
+        )(),
+    )
+    assert workspace.git.default_branch(tmp_path) == "master"
+
+
+def test_default_branch_falls_back_to_main(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        workspace.git,
+        "run",
+        lambda args, cwd=None, check=True: type("R", (), {"stdout": "", "returncode": 1})(),
+    )
+    assert workspace.git.default_branch(tmp_path) == "main"

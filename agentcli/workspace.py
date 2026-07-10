@@ -10,8 +10,8 @@ from agentcli.config import (
     BOT_EMAIL,
     BOT_NAME,
     SESSION_POINTER_DIR,
-    agent_root,
     repo_path,
+    src_root,
     worktree_base,
 )
 from agentcli.errors import AgentConfigError, AgentGitError, AgentInputError
@@ -105,10 +105,10 @@ def _git_app_auth(worktree: Path) -> None:
     git.config_set(worktree, "core.hooksPath", ".githooks", worktree=True)
 
 
-def _sync_primary_main(checkout: Path) -> None:
-    """Best-effort fast-forward of the checkout's main. Never blocks worktree creation."""
+def _sync_primary_default_branch(checkout: Path) -> None:
+    """Best-effort fast-forward of the checkout's default branch. Never blocks creation."""
     try:
-        if git.current_branch(checkout) != "main" or git.is_dirty(checkout):
+        if git.current_branch(checkout) != git.default_branch(checkout) or git.is_dirty(checkout):
             return
         git.fast_forward(checkout)
     except AgentGitError:
@@ -161,7 +161,7 @@ def prune_session_pointers() -> int:
 
 def managed_repos() -> list[str]:
     """Every repo checkout under the agent root."""
-    return sorted(p.name for p in agent_root().iterdir() if p.is_dir() and git.is_checkout(p))
+    return sorted(p.name for p in src_root().iterdir() if p.is_dir() and git.is_checkout(p))
 
 
 def session_worktrees(repo: str) -> list[Path]:
@@ -185,11 +185,12 @@ def create(branch: str, repo: str) -> Path:
     gc(repo=repo, quiet=True)
 
     git.run(["-C", str(checkout), "fetch", "--quiet", "origin"])
-    _sync_primary_main(checkout)
+    _sync_primary_default_branch(checkout)
 
+    base = f"origin/{git.default_branch(checkout)}"
     worktree.parent.mkdir(parents=True, exist_ok=True)
     git.run(
-        ["-C", str(checkout), "worktree", "add", "-b", branch, str(worktree), "origin/main"],
+        ["-C", str(checkout), "worktree", "add", "-b", branch, str(worktree), base],
     )
 
     # New worktrees are untrusted, and the tool shims read their env from mise

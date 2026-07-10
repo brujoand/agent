@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from agentcli import git, github, repos, workspace
-from agentcli.config import DEFAULT_REPO, PRIVATE_ENV, agent_root, repo_path
+from agentcli.config import DEFAULT_REPO, PRIVATE_ENV, repo_path, src_root
 from agentcli.creds import load_app_creds
 from agentcli.errors import AgentError
 
@@ -68,13 +66,9 @@ def _check_helpers() -> bool:
     expected = git.helper_spec()
     stale: list[str] = []
 
-    # The agent root itself is easy to forget: `agent pull` skips cloning it, and
-    # managed_repos() only walks its subdirectories. It still has to fetch and
-    # push like any other checkout.
-    checkouts = [agent_root(), *(repo_path(name) for name in workspace.managed_repos())]
-    legacy_primary = Path.home() / "src" / "gitops-homelab"
-    if git.is_checkout(legacy_primary):
-        checkouts.append(legacy_primary)
+    # No special cases: every managed checkout is a sibling under src_root(), the
+    # agent repo included.
+    checkouts = [repo_path(name) for name in workspace.managed_repos()]
 
     for checkout in checkouts:
         actual = git.config_get(checkout, git.GITHUB_HELPER_KEY)
@@ -97,7 +91,7 @@ def _check_helpers() -> bool:
 
 
 def run() -> int:
-    print(f"agent root: {agent_root()}\n")
+    print(f"src root: {src_root()}\n")
     checks = [_check_creds, _check_token, _check_repos, _check_lab, _check_helpers]
     results = [check() for check in checks]
     print()

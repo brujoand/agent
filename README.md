@@ -1,10 +1,18 @@
 # agent
 
-The root of all agentic tasks, and the `agent` CLI that runs them.
+The `agent` CLI that runs all agentic tasks.
 
-Every repo the `brujoand-agent` GitHub App can reach is cloned as a sibling
-directory here (and gitignored). `gitops-homelab` is one of them, which is why
-this repo cannot depend on `lab`: it is what puts `lab` on disk.
+`agent pull` clones every repo the `brujoand-agent` GitHub App can reach into
+`~/src`, as **siblings of this checkout** — this repo is simply one of them.
+`gitops-homelab` is another, which is why this repo cannot depend on `lab`: it is
+what puts `lab` on disk.
+
+```
+~/src/agent            this repo (and the CLI)
+~/src/gitops-homelab   lab lives here; `agent lab install` installs from it
+~/src/dotfiles  ...    every other reachable repo
+~/worktrees/<repo>/session-<slug>    worktrees, per repo
+```
 
 **The dependency points one way: `agent` → `lab`, never back.**
 
@@ -13,9 +21,9 @@ this repo cannot depend on `lab`: it is what puts `lab` on disk.
 ```bash
 curl -fsSL https://mise.run | sh     # mise depends on nothing
 git clone https://github.com/brujoand/agent ~/src/agent
-~/src/agent/bootstrap.sh             # mise install + uv sync + symlink ~/.local/bin/agent
-agent pull                           # clone every reachable repo as a sibling
-agent lab install                    # install lab from ./gitops-homelab
+~/src/agent/bootstrap.sh             # mise install, uv sync, install agent into ~/.local/bin
+agent pull                           # clone every reachable repo into ~/src
+agent lab install                    # install lab from ~/src/gitops-homelab
 ```
 
 `agent` needs the App credentials in `~/.bash_private` (`APP_ID`,
@@ -32,8 +40,8 @@ fallback: this host has no `OP_SERVICE_ACCOUNT_TOKEN` and never will.
 | `agent github token [--refresh]` | short-lived App installation token |
 | `agent git-credential get` | git credential helper (wired into every clone) |
 | `agent repos` | HTTPS clone URLs the App installation can reach |
-| `agent pull` | clone or fast-forward every reachable repo |
-| `agent lab install` | install `lab` from `./gitops-homelab` |
+| `agent pull` | clone or fast-forward every reachable repo into `~/src` |
+| `agent lab install` | install `lab` from `~/src/gitops-homelab` |
 | `agent lab <args...>` | run `lab` with `GH_TOKEN`/`KUBECONFIG` set |
 | `agent workspace create <type>/<slug> [--repo]` | worktree off a fresh `origin/main` |
 | `agent workspace delete\|list\|gc [--repo]` | manage session worktrees |

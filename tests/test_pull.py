@@ -9,28 +9,30 @@ from agentcli import git, pull, repos
 
 @pytest.fixture
 def fake_root(tmp_path, monkeypatch):
-    monkeypatch.setattr(pull, "agent_root", lambda: tmp_path)
+    monkeypatch.setattr(pull, "src_root", lambda: tmp_path)
     monkeypatch.setattr(git, "INSTALLED_AGENT", tmp_path / ".local" / "bin" / "agent")
     return tmp_path
 
 
-def test_self_repo_is_skipped_but_its_helper_is_still_asserted(fake_root, monkeypatch):
-    """`agent pull` never clones itself -- and must still keep its own helper current.
+def test_agent_repo_is_an_ordinary_sibling(fake_root, monkeypatch):
+    """No self-skip: with checkouts as siblings, the agent repo is just another one.
 
-    Regression: the agent root was the one checkout nothing repointed. `pull`
-    skips it (cloning would nest agent/ inside agent/) and `doctor` only walked
-    subdirectories, so it kept a stale helper and its own `git push` broke.
+    Regression guard for the old nested layout, where `pull` skipped its own repo
+    and `doctor` only walked subdirectories -- so the agent checkout kept a stale
+    credential helper and its own `git push` broke.
     """
     monkeypatch.setattr(repos, "clone_urls", lambda: ["https://github.com/brujoand/agent.git"])
-    monkeypatch.setattr(pull, "_self_slug", lambda root: "brujoand/agent")
+    dest = fake_root / "agent"
+    (dest / ".git").mkdir(parents=True)
 
     asserted: list[Path] = []
     monkeypatch.setattr(
         git, "set_github_helper", lambda repo, worktree=False: asserted.append(repo)
     )
+    monkeypatch.setattr(git, "fast_forward", lambda repo: None)
 
     assert pull.run() == 0
-    assert asserted == [fake_root]
+    assert asserted == [dest]
 
 
 def test_sync_one_reasserts_helper_on_existing_checkout(fake_root, monkeypatch):

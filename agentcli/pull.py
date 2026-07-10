@@ -3,19 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentcli import git, repos
-from agentcli.config import agent_root
+from agentcli.config import src_root
 from agentcli.errors import AgentError, AgentGitError
-
-
-def _self_slug(root: Path) -> str | None:
-    """The repo this CLI lives in, if any.
-
-    Skipped below: cloning it into its own directory would nest agent/ inside
-    agent/.
-    """
-    result = git.run(["-C", str(root), "remote", "get-url", "origin"], check=False)
-    origin = result.stdout.strip()
-    return repos.slug(origin) if origin else None
 
 
 def sync_one(url: str, dest: Path) -> str:
@@ -38,8 +27,7 @@ def sync_one(url: str, dest: Path) -> str:
 
 
 def run() -> int:
-    root = agent_root()
-    self_slug = _self_slug(root)
+    root = src_root()
     urls = repos.clone_urls()
     if not urls:
         raise AgentError("no reachable repositories")
@@ -47,14 +35,10 @@ def run() -> int:
     failed: list[str] = []
     for url in urls:
         name = repos.name(url)
-        if self_slug and repos.slug(url) == self_slug:
-            # Never clone ourselves (it would nest agent/ inside agent/), but DO
-            # keep our own credential helper current: this checkout needs to
-            # fetch and push like any other, and nothing else would fix it.
-            git.set_github_helper(root)
-            print(f"==> skipping {name} (this repo)")
-            continue
-
+        # The agent repo is an ordinary sibling now -- cloned, fast-forwarded and
+        # helper-asserted like the rest. Safe because the installed CLI is an
+        # isolated copy, so updating this checkout cannot pull the CLI out from
+        # under the running process.
         try:
             action = sync_one(url, root / name)
             print(f"==> {action} {name}")
