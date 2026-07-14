@@ -1,17 +1,21 @@
 #!/usr/bin/env python3
-"""Interactive GitHub issue agent driven by the Claude Agent SDK.
+"""Interactive GitHub issue agent.
 
-Holds ONE live ``ClaudeSDKClient`` session for the whole conversation with a
-GitHub issue. The agent investigates, and either asks the user clarifying
-questions (posted as issue comments) or acts (opens a ready PR / posts findings).
-When it asks, this wrapper blocks polling the issue thread for the user's reply
-and feeds it back into the SAME session — no re-ingest of context per turn.
+Holds ONE live agent session for the whole conversation with a GitHub issue.
+The LLM backend sits behind the provider abstraction in ``providers/``
+(``AGENT_PROVIDER``, default ``claude`` = the Claude Agent SDK adapter); this
+wrapper never touches a provider SDK directly. The agent investigates, and
+either asks the user clarifying questions (posted as issue comments) or acts
+(opens a ready PR / posts findings). When it asks, this wrapper blocks polling
+the issue thread for the user's reply and feeds it back into the SAME session
+— no re-ingest of context per turn.
 
-The session transcript is mirrored to MinIO (S3-compatible) via
-``S3SessionStore``, keyed by a deterministic session id derived from the issue.
-If the job is killed by the GitHub Actions timeout mid-conversation, a later
-comment on the `agent`-labelled thread re-runs this wrapper which RESUMES the
-same session from MinIO and continues synchronously.
+The Claude provider mirrors the session transcript to MinIO (S3-compatible)
+via ``S3SessionStore``, keyed by a deterministic session id derived from the
+issue. If the job is killed by the GitHub Actions timeout mid-conversation, a
+later comment on the `agent`-labelled thread re-runs this wrapper which
+RESUMES the same session from MinIO and continues synchronously. Providers
+without persistence always start fresh.
 
 Flow control is model-driven via sentinel markers the agent emits in its text:
   - ``<<<ASK>>>`` ... ``<<<END_ASK>>>``   -> post the enclosed text as a question,
@@ -38,14 +42,18 @@ Environment:
   ISSUE_NUMBER         (required) the issue to work
   GITHUB_REPOSITORY    (required) owner/repo (provided by Actions)
   GITHUB_TOKEN         (required) for gh CLI (provided by Actions)
+  AGENT_PROVIDER       (optional) default claude; selects the providers/ adapter
+  AGENT_MODEL          (optional) default claude-opus-4-8; passed through to the
+                       provider opaquely
+  MAX_RUNTIME_SECONDS  (optional) default 2940 (49 min); exit cleanly before the
+                       GitHub job timeout-minutes kills the pod.
+  POLL_INTERVAL_SECONDS(optional) default 20
+
+Claude provider only (AGENT_PROVIDER=claude):
   CLAUDE_CODE_OAUTH_TOKEN (required) consumed by the Claude Code CLI the SDK runs
   MINIO_ENDPOINT_URL   (required) e.g. http://minio.data.svc.cluster.local:80
   MINIO_BUCKET         (required) e.g. issue-agent-sessions
   AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (required) bucket-scoped MinIO creds
-  AGENT_MODEL          (optional) default claude-opus-4-8
-  MAX_RUNTIME_SECONDS  (optional) default 2940 (49 min); exit cleanly before the
-                       GitHub job timeout-minutes kills the pod.
-  POLL_INTERVAL_SECONDS(optional) default 20
 """
 
 from __future__ import annotations
@@ -61,18 +69,7 @@ import urllib.request
 import uuid
 
 import anyio
-import boto3
-
-from claude_agent_sdk import (
-    AssistantMessage,
-    ClaudeAgentOptions,
-    ClaudeSDKClient,
-    ResultMessage,
-    TextBlock,
-    project_key_for_directory,
-)
-
-from s3_session_store import S3SessionStore
+from providers import SessionConfig, TurnUsage, create_provider
 
 # Stable namespace so the session id for an issue is reproducible across runs.
 _SESSION_NAMESPACE = uuid.UUID("6f3b2c1a-9d4e-5a6b-8c7d-0e1f2a3b4c5d")
@@ -157,21 +154,6 @@ def pr_session_id_for(repo: str, pr: str) -> str:
     # Distinct namespace ("!pr#") so a PR session never collides with the
     # issue session that spawned it.
     return str(uuid.uuid5(_SESSION_NAMESPACE, f"{repo}!pr#{pr}"))
-
-
-def make_store() -> S3SessionStore:
-    client = boto3.client(
-        "s3",
-        endpoint_url=env("MINIO_ENDPOINT_URL", required=True),
-        aws_access_key_id=env("AWS_ACCESS_KEY_ID", required=True),
-        aws_secret_access_key=env("AWS_SECRET_ACCESS_KEY", required=True),
-        region_name="us-east-1",  # ignored by MinIO but boto3 wants one
-    )
-    return S3SessionStore(
-        bucket=env("MINIO_BUCKET", required=True),
-        prefix="transcripts",
-        client=client,
-    )
 
 
 def latest_human_comment(repo: str, issue: str, since_iso: str) -> str | None:
@@ -389,10 +371,14 @@ PUSHGATEWAY_URL = os.environ.get(
 
 
 class UsageTracker:
-    """Accumulates token/cost/turn totals across ResultMessages and pushes
+    """Accumulates token/cost/turn totals across TurnUsage records and pushes
     them to the pushgateway after every turn, so a hard kill still leaves the
     latest numbers behind. Push failures are non-fatal — metrics must never
-    break the agent."""
+    break the agent.
+
+    Metric names keep the `claude_agent_` prefix even though the backend is
+    now provider-agnostic: renaming would orphan the existing Grafana series.
+    Rename (with dashboard updates) as a deliberate follow-up, not in passing."""
 
     _TOKEN_KEYS = (
         "input_tokens",
@@ -408,12 +394,11 @@ class UsageTracker:
         self.cost_usd = 0.0
         self.num_turns = 0
 
-    def record(self, result: ResultMessage) -> None:
-        usage = result.usage or {}
+    def record(self, usage: TurnUsage) -> None:
         for key in self._TOKEN_KEYS:
-            self.tokens[key] += int(usage.get(key) or 0)
-        self.cost_usd += float(result.total_cost_usd or 0.0)
-        self.num_turns += int(result.num_turns or 0)
+            self.tokens[key] += getattr(usage, key)
+        self.cost_usd += usage.cost_usd
+        self.num_turns += usage.num_turns
         self.push()
 
     def push(self) -> None:
@@ -426,12 +411,14 @@ class UsageTracker:
         lines.append(f"claude_agent_turns_total{labels} {self.num_turns}")
         body = "\n".join(lines) + "\n"
         url = f"{PUSHGATEWAY_URL}/metrics/job/issue-agent/issue/{self.issue}"
-        req = urllib.request.Request(
+        # S310: the URL scheme comes from PUSHGATEWAY_URL (cluster config),
+        # always http(s) — never file: or a custom scheme.
+        req = urllib.request.Request(  # noqa: S310
             url, data=body.encode(), method="PUT",
             headers={"Content-Type": "text/plain"},
         )
         try:
-            urllib.request.urlopen(req, timeout=5).close()
+            urllib.request.urlopen(req, timeout=5).close()  # noqa: S310
         except (urllib.error.URLError, OSError) as exc:
             print(f"pushgateway push failed (non-fatal): {exc}", file=sys.stderr)
 
@@ -461,17 +448,6 @@ class UsageTracker:
                 f"| cache read tokens | {self.tokens['cache_read_input_tokens']} |\n"
                 f"| cache-hit ratio | {cache_ratio:.1%} |\n"
             )
-
-
-def assistant_text(messages: list) -> str:
-    """Concatenate all assistant text blocks across a turn's messages."""
-    out: list[str] = []
-    for msg in messages:
-        if isinstance(msg, AssistantMessage):
-            for block in msg.content:
-                if isinstance(block, TextBlock):
-                    out.append(block.text)
-    return "\n".join(out)
 
 
 SEED_PROMPT = """\
@@ -567,58 +543,29 @@ async def run() -> int:
     # remains the variable name used throughout the loop (gh issue/pr view both
     # accept it) to keep the diff small.
     issue = env("PR_NUMBER" if is_pr else "ISSUE_NUMBER", required=True)
-    # claude-model: manual bump per Claude release (no Renovate datasource tracks
-    # Anthropic model IDs). Overridden by AGENT_MODEL in the workflows.
+    # AGENT_PROVIDER selects the providers/ adapter; the model id is passed
+    # through to it opaquely. claude-model: manual bump per Claude release (no
+    # Renovate datasource tracks Anthropic model IDs). Overridden by
+    # AGENT_MODEL in the workflows.
+    provider_name = env("AGENT_PROVIDER", "claude")
     model = env("AGENT_MODEL", "claude-opus-4-8")
     max_runtime = int(env("MAX_RUNTIME_SECONDS", "2940"))
     poll_interval = int(env("POLL_INTERVAL_SECONDS", "20"))
     started = time.monotonic()
 
     sid = pr_session_id_for(repo, issue) if is_pr else session_id_for(repo, issue)
-    store = make_store()
+    provider = create_provider(provider_name)
     cwd = env("GITHUB_WORKSPACE", os.getcwd())
 
-    # Decide fresh-vs-resume by probing the store for THIS session's transcript.
-    # The SDK keys transcripts by a cwd-derived project_key (not the repo slug),
-    # so derive it with the SDK's own helper and load the exact key.
-    project_key = project_key_for_directory(cwd)
-    existing = await store.load({"project_key": project_key, "session_id": sid})
-    resume = bool(existing)
+    # Decide fresh-vs-resume by probing the provider for THIS session's
+    # persisted transcript (how it is keyed and stored is the adapter's business).
+    resume = await provider.session_exists(sid, cwd)
     print(
-        f"session {sid} project_key={project_key} resume={resume} model={model}",
+        f"session {sid} provider={provider_name} resume={resume} model={model}",
         file=sys.stderr,
     )
 
-    opts = ClaudeAgentOptions(
-        model=model,
-        # Cost ceiling per query; wall-clock MAX_RUNTIME_SECONDS still bounds
-        # the whole session.
-        max_turns=50,
-        permission_mode="acceptEdits",
-        setting_sources=["project"],  # load CLAUDE.md + .claude/agents/
-        allowed_tools=[
-            "Read",
-            "Glob",
-            "Grep",
-            "Edit",
-            "Write",
-            "Task",
-            "Bash(git:*)",
-            "Bash(gh:*)",
-            "Bash(pre-commit:*)",
-            "Bash(mise:*)",
-            "Bash(kubectl:*)",
-            # Query the in-cluster observability HTTP APIs directly. `lab` would
-            # need pods/exec + port-forward (privilege the read-only `view` SA
-            # deliberately lacks); curling the Service endpoints stays read-only.
-            "Bash(curl:*)",
-        ],
-        session_store=store,
-        # Operate on the checked-out repo (Actions sets GITHUB_WORKSPACE), not
-        # the wrapper's own dir.
-        cwd=cwd,
-        **({"resume": sid} if resume else {"session_id": sid}),
-    )
+    cfg = SessionConfig(model=model, cwd=cwd, session_id=sid, resume=resume)
 
     usage = UsageTracker(issue=issue, model=model)
 
@@ -629,7 +576,7 @@ async def run() -> int:
     # once by the opener; resumes find it already there and skip.
     post_announcement(view_cmd, repo, issue)
 
-    async with ClaudeSDKClient(options=opts) as client:
+    async with provider.open_session(cfg) as session:
         if resume:
             first_prompt = (
                 "Resuming after an interruption. You retain full prior context "
@@ -690,19 +637,15 @@ async def run() -> int:
                 usage.write_job_summary()
                 return 0
 
-            await client.query(prompt)
-            messages = [m async for m in client.receive_response()]
-            text = assistant_text(messages)
-            result = next(
-                (m for m in messages if isinstance(m, ResultMessage)), None
-            )
-            if result is not None:
+            turn = await session.run_turn(prompt)
+            text = turn.text
+            if turn.usage is not None:
                 print(
-                    f"turn done session={result.session_id} "
-                    f"turns={result.num_turns} err={result.is_error}",
+                    f"turn done session={turn.session_id} "
+                    f"turns={turn.usage.num_turns} err={turn.is_error}",
                     file=sys.stderr,
                 )
-                usage.record(result)
+                usage.record(turn.usage)
 
             if DONE_MARKER in text:
                 # The reader-facing summary the model enclosed in the paired DONE
