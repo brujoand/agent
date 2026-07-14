@@ -118,9 +118,7 @@ def env(name: str, default: str | None = None, required: bool = False) -> str:
 
 def gh(*args: str, check: bool = True) -> str:
     """Run a gh CLI command and return stdout."""
-    result = subprocess.run(
-        ["gh", *args], capture_output=True, text=True, check=False
-    )
+    result = subprocess.run(["gh", *args], capture_output=True, text=True, check=False)
     if check and result.returncode != 0:
         print(f"gh {' '.join(args)} failed: {result.stderr}", file=sys.stderr)
         raise RuntimeError(result.stderr)
@@ -229,8 +227,7 @@ def already_announced(view_cmd: str, repo: str, issue: str) -> bool:
     so the opener posts it once and every resume skips it. `gh` GraphQL reports
     the bare App login, matching AGENT_BOT_LOGIN (see that note).
     """
-    raw = gh(view_cmd, "view", issue, "--repo", repo, "--json", "comments",
-             check=False)
+    raw = gh(view_cmd, "view", issue, "--repo", repo, "--json", "comments", check=False)
     if not raw:
         return False
     try:
@@ -267,9 +264,7 @@ def post_announcement(view_cmd: str, repo: str, issue: str) -> None:
 
 def pr_is_closed(repo: str, pr: str) -> bool:
     """True if the PR is merged or closed — the PR session's terminal state."""
-    raw = gh(
-        "pr", "view", pr, "--repo", repo, "--json", "state", check=False
-    )
+    raw = gh("pr", "view", pr, "--repo", repo, "--json", "state", check=False)
     if not raw:
         return False
     try:
@@ -334,9 +329,7 @@ def pr_ref_in_text(pr_url: str, text: str) -> bool:
     if not m:
         return False
     pr_num = m.group(1)
-    return bool(
-        re.search(rf"(?:/pull/{re.escape(pr_num)}|#{re.escape(pr_num)})\b", text)
-    )
+    return bool(re.search(rf"(?:/pull/{re.escape(pr_num)}|#{re.escape(pr_num)})\b", text))
 
 
 def issue_already_links_pr(repo: str, issue: str, pr_url: str) -> bool:
@@ -349,8 +342,7 @@ def issue_already_links_pr(repo: str, issue: str, pr_url: str) -> bool:
     ``Opened #<n>`` note carried no marker, so a URL-only check missed it and
     double-posted.
     """
-    raw = gh("issue", "view", issue, "--repo", repo, "--json", "comments",
-             check=False)
+    raw = gh("issue", "view", issue, "--repo", repo, "--json", "comments", check=False)
     if not raw:
         return False
     try:
@@ -404,7 +396,7 @@ class UsageTracker:
     def push(self) -> None:
         labels = f'{{model="{self.model}"}}'
         lines = [
-            f"claude_agent_tokens_total{{model=\"{self.model}\",type=\"{k}\"}} {v}"
+            f'claude_agent_tokens_total{{model="{self.model}",type="{k}"}} {v}'
             for k, v in self.tokens.items()
         ]
         lines.append(f"claude_agent_cost_usd_total{labels} {self.cost_usd}")
@@ -414,7 +406,9 @@ class UsageTracker:
         # S310: the URL scheme comes from PUSHGATEWAY_URL (cluster config),
         # always http(s) — never file: or a custom scheme.
         req = urllib.request.Request(  # noqa: S310
-            url, data=body.encode(), method="PUT",
+            url,
+            data=body.encode(),
+            method="PUT",
             headers={"Content-Type": "text/plain"},
         )
         try:
@@ -431,11 +425,7 @@ class UsageTracker:
             + self.tokens["input_tokens"]
             + self.tokens["cache_creation_input_tokens"]
         )
-        cache_ratio = (
-            self.tokens["cache_read_input_tokens"] / cache_denom
-            if cache_denom
-            else 0.0
-        )
+        cache_ratio = self.tokens["cache_read_input_tokens"] / cache_denom if cache_denom else 0.0
         with open(path, "a", encoding="utf-8") as fh:
             fh.write(
                 f"### Claude usage (issue #{self.issue}, {self.model})\n\n"
@@ -597,9 +587,7 @@ async def run() -> int:
                 if linked
                 else ""
             )
-            first_prompt = PR_SEED_PROMPT.format(
-                pr=issue, repo=repo, issue_context=issue_context
-            )
+            first_prompt = PR_SEED_PROMPT.format(pr=issue, repo=repo, issue_context=issue_context)
         else:
             first_prompt = SEED_PROMPT.format(issue=issue, repo=repo)
 
@@ -618,7 +606,9 @@ async def run() -> int:
                     "labelled `agent`) — I keep full context."
                 )
                 post_comment(
-                    view_cmd, issue, repo,
+                    view_cmd,
+                    issue,
+                    repo,
                     with_runner_context(pause_note, "Was running in"),
                 )
                 # `agent-waiting` is an issue-only handoff signal; PRs have no
@@ -690,12 +680,8 @@ async def run() -> int:
                     "labelled `agent`) — I resume with full context from the "
                     "persisted transcript."
                 )
-                body = (
-                    f"{summary}\n\n---\n{ended_footer}" if summary else ended_footer
-                )
-                post_comment(
-                    view_cmd, issue, repo, with_runner_context(body, "Ran in")
-                )
+                body = f"{summary}\n\n---\n{ended_footer}" if summary else ended_footer
+                post_comment(view_cmd, issue, repo, with_runner_context(body, "Ran in"))
                 print("agent signalled DONE", file=sys.stderr)
                 usage.write_job_summary()
                 return 0
@@ -728,7 +714,9 @@ async def run() -> int:
                 "mention `@brujoand-agent` if this thread isn't labelled `agent`)."
             )
             post_comment(
-                view_cmd, issue, repo,
+                view_cmd,
+                issue,
+                repo,
                 with_runner_context(question + waiting_note, "Running in"),
             )
             asked_at = now_iso()

@@ -86,9 +86,7 @@ class ClaudeProvider:
         # The SDK keys transcripts by a cwd-derived project_key (not the repo
         # slug), so derive it with the SDK's own helper and load the exact key.
         project_key = project_key_for_directory(cwd)
-        existing = await self._store.load(
-            {"project_key": project_key, "session_id": session_id}
-        )
+        existing = await self._store.load({"project_key": project_key, "session_id": session_id})
         return bool(existing)
 
     def open_session(self, config: SessionConfig) -> ClaudeSession:
@@ -146,9 +144,7 @@ class ClaudeSession:
             usage = TurnUsage(
                 input_tokens=int(u.get("input_tokens") or 0),
                 output_tokens=int(u.get("output_tokens") or 0),
-                cache_creation_input_tokens=int(
-                    u.get("cache_creation_input_tokens") or 0
-                ),
+                cache_creation_input_tokens=int(u.get("cache_creation_input_tokens") or 0),
                 cache_read_input_tokens=int(u.get("cache_read_input_tokens") or 0),
                 cost_usd=float(result.total_cost_usd or 0.0),
                 num_turns=int(result.num_turns or 0),
