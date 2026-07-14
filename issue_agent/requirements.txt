@@ -1,2 +1,4 @@
+# claude-agent-sdk is also a dev-dependency in the repo-root pyproject.toml so
+# the provider tests import the real SDK types — keep the pins in sync.
 claude-agent-sdk==0.2.110
 boto3==1.43.36

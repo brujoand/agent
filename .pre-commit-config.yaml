@@ -49,11 +49,14 @@ repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.15.10
     hooks:
+      # issue_agent/s3_session_store.py stays vendored: the pyproject ruff
+      # exclude covers it even here, because ruff-pre-commit passes
+      # --force-exclude with the filenames.
       - id: ruff
         args: [--fix]
-        files: ^(agentcli|tests)/.*\.py$
+        files: ^(agentcli|tests|issue_agent)/.*\.py$
       - id: ruff-format
-        files: ^(agentcli|tests)/.*\.py$
+        files: ^(agentcli|tests|issue_agent)/.*\.py$
 
   - repo: local
     hooks:
@@ -70,12 +73,13 @@ repos:
         files: ^.*\.sh$|^agent$
         pass_filenames: true
 
-      # agentcli must run on the CI runner image, whose python3 is 3.12 (Ubuntu
-      # 24.04). Nothing else catches a 3.13+/3.14-only construct until the image
-      # build fails -- or worse, until a workflow does.
+      # agentcli and issue_agent must run on the CI runner image, whose python3
+      # is 3.12 (Ubuntu 24.04) -- the /opt/issue-agent venv is built from that
+      # same python3. Nothing else catches a 3.13+/3.14-only construct until the
+      # image build fails -- or worse, until a workflow does.
       - id: python-min-version
-        name: Parse agentcli under the minimum supported Python (3.12)
+        name: Parse agentcli + issue_agent under the minimum supported Python (3.12)
         entry: python3 -c "import ast,sys; [ast.parse(open(f).read(), f) for f in sys.argv[1:]]"
         language: system
-        files: ^(agentcli|tests)/.*\.py$
+        files: ^(agentcli|tests|issue_agent)/.*\.py$
         pass_filenames: true

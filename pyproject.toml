@@ -21,17 +21,23 @@ dev-dependencies = [
   "pytest>=8.0",
   "pytest-httpx>=0.35",
   "ruff>=0.9.0",
+  # For the issue_agent provider tests only: importing the SDK needs no Claude
+  # Code CLI (only running a client does), and testing the adapter against the
+  # real SDK types beats hand-rolled fakes that would rot. Pin MUST match
+  # issue_agent/requirements.txt (the runtime venv) — keep in sync.
+  "claude-agent-sdk==0.2.110",
+  "anyio>=4.0",
 ]
 
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-# issue_agent/ is not ours to reformat: s3_session_store.py is vendored verbatim
-# from the Claude Agent SDK examples, and agent.py moved here unchanged from
-# gitops-homelab, where ruff never covered it either (its hook was scoped to
-# lab/(labcli|tests)). Linting it would fork the vendored file from upstream for
-# no benefit. It runs in its own /opt/issue-agent venv, not agentcli's.
-extend-exclude = ["issue_agent"]
+# s3_session_store.py is vendored verbatim from the Claude Agent SDK examples;
+# linting it would fork it from upstream for no benefit. The rest of issue_agent/
+# (agent.py + providers/) is ours — owned since the provider-abstraction refactor
+# — and lint-covered like everything else, even though it runs in its own
+# /opt/issue-agent venv.
+extend-exclude = ["issue_agent/s3_session_store.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "S"]
