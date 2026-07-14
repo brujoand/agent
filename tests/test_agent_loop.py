@@ -1,8 +1,8 @@
 """The wrapper loop above the provider seam: markers, usage totals, and one
 thin end-to-end pass of run() driven by a fake provider."""
 
-import anyio
 import agent
+import anyio
 import pytest
 from providers.base import SessionConfig, TurnResult, TurnUsage
 
