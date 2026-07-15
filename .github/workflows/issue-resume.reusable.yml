@@ -1,0 +1,72 @@
+name: Claude issue agent resume (reusable)
+
+# Reusable resume path. Called from an `issue_comment: created` caller. The
+# `agent` label is the standing opt-in: any authorized human comment resumes the
+# persisted session. The authorization guard lives here (centralized, security-
+# critical) rather than in each caller.
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        type: string
+        required: false
+        default: claude-opus-4-8
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+jobs:
+  resume:
+    # Wake only on an `agent`-labelled issue (not a PR), on a human comment from
+    # someone authorized. The agent's own comments arrive as brujoand-agent[bot]
+    # (type Bot, author_association NONE) and so fail both checks — no self-retrigger.
+    if: >-
+      !github.event.issue.pull_request &&
+      contains(github.event.issue.labels.*.name, 'agent') &&
+      github.event.comment.user.type != 'Bot' &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR' ||
+       github.event.comment.user.login == 'brujoand')
+    runs-on: homelab-runners
+    timeout-minutes: 55
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Mint GitHub App token
+        id: app-token
+        env:
+          PEM_PATH: /run/agent/private-key.pem
+        run: |
+          token="$(APP_ID="${AGENT_APP_ID}" APP_INSTALLATION_ID="${AGENT_APP_INSTALLATION_ID}" agent github token)"
+          if [[ -z "$token" ]]; then
+            echo "::error::App-token mint returned no token" >&2
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          printf 'token=%s\n' "$token" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Install mise
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
+
+      - name: Resume interactive issue agent
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          MINIO_ENDPOINT_URL: http://minio.data.svc.cluster.local:80
+          MINIO_BUCKET: issue-agent-sessions
+          AGENT_MODEL: ${{ inputs.model }}
+          MAX_RUNTIME_SECONDS: "2940"
+        run: |
+          PYTHONPATH=/opt/issue-agent \
+            /opt/issue-agent/venv/bin/python /opt/issue-agent/agent.py

@@ -1,0 +1,118 @@
+name: PR review (reusable)
+
+# Reusable one-shot PR verification. Called from a `pull_request` caller. Reads a
+# PR against its intent (the linked issue + description) plus quality/security and
+# posts ONE review comment. Never approves/blocks — a human merges.
+#
+# This is the GENERIC review (no repo-specific rendering). gitops-homelab keeps
+# its own konflate-flavoured pr-review.yml and does NOT call this one. A consumer
+# that wants tailored review criteria overrides `review_prompt`, or drops repo
+# conventions in CLAUDE.md / .claude/ (which the reviewer reads).
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        type: string
+        required: false
+        default: claude-opus-4-8
+      review_prompt:
+        description: Extra, repo-specific review criteria appended to the base prompt.
+        type: string
+        required: false
+        default: ""
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+jobs:
+  review:
+    # Opt-in: only `agent`-labelled PRs. On a `labeled` event additionally require
+    # the label just added to be `agent`. Human + Claude-agent PRs only (allow the
+    # brujoand-agent App explicitly while excluding other bots). Skip drafts.
+    if: >-
+      (github.event.action != 'labeled' || github.event.label.name == 'agent') &&
+      contains(github.event.pull_request.labels.*.name, 'agent') &&
+      (!endsWith(github.event.pull_request.user.login, '[bot]') ||
+       github.event.pull_request.user.login == 'brujoand-agent[bot]') &&
+      github.event.pull_request.draft == false
+    runs-on: homelab-runners
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+      id-token: write
+    steps:
+      - name: Mint GitHub App token
+        id: app-token
+        env:
+          PEM_PATH: /run/agent/private-key.pem
+        run: |
+          token="$(APP_ID="${AGENT_APP_ID}" APP_INSTALLATION_ID="${AGENT_APP_INSTALLATION_ID}" agent github token)"
+          if [[ -z "$token" ]]; then
+            echo "::error::App-token mint returned no token" >&2
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          printf 'token=%s\n' "$token" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Install mise
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
+
+      - name: Run PR review
+        uses: anthropics/claude-code-action@a92e7c70a4da9793dc164451d829089dc057a464 # v1.0.159
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # App installation token so the review comment is authored by the App
+          # and can seed a later agent session; parity with the agent workflows.
+          github_token: ${{ steps.app-token.outputs.token }}
+          # An agent PR is opened by the App, so the triggering actor is
+          # brujoand-agent[bot]; the action refuses non-human actors unless
+          # allow-listed. The job `if:` already restricts bot triggers to this App.
+          allowed_bots: "brujoand-agent[bot]"
+          prompt: |
+            REPO: ${{ github.repository }}
+            PR NUMBER: ${{ github.event.pull_request.number }}
+
+            You are a one-shot verification reviewer. Do NOT hold a conversation,
+            do NOT push commits, do NOT approve or request changes — post a single
+            review comment. A human still merges.
+
+            Answer two questions, in order:
+              (1) Does the change actually DO what it is supposed to? Compare the
+                  code against its stated INTENT — the linked issue and the PR
+                  description.
+              (2) Does it meet quality and security standards?
+
+            Steps:
+            1. Establish intent, then check the diff against it:
+               - `gh pr view ${{ github.event.pull_request.number }}` — title +
+                 description (the claimed change).
+               - If the body says `Closes #<M>` (or Fixes/Resolves #<M>), read that
+                 issue: `gh issue view <M> --comments` — the requirement the code
+                 must satisfy. (Dependency-bump PRs have no linked issue; judge on
+                 the description.)
+               - `gh pr diff ${{ github.event.pull_request.number }}` — the change.
+               Verify the diff fulfils the issue + description: called-for changes
+               present, nothing half-done, no unrelated scope creep.
+            2. Read CLAUDE.md and any `.claude/` conventions, then review against
+               them — correctness, security, and the repo's own hard rules.
+            ${{ inputs.review_prompt }}
+
+            Post ONE PR comment with `gh pr comment`, formatted as:
+            - A first line: `## Agent verification — <verified | comments | concerns>`.
+            - One short line on intent: does it fulfil the linked issue + PR
+              description? Name specific points it does / does NOT satisfy.
+            - Then terse, prioritized bullets: `file:line — issue — suggested fix`.
+              If all good, say so in one line. Advisory only; be specific and brief.
+          claude_args: |
+            --model ${{ inputs.model }}
+            --max-turns 30
+            --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh issue view:*),Bash(gh pr comment:*),Read,Glob,Grep"
+          additional_permissions: |
+            actions: read

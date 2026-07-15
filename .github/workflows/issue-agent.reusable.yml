@@ -1,0 +1,83 @@
+name: Claude issue agent (reusable)
+
+# Reusable opener for the interactive issue agent. Consumer repos call this from a
+# thin `issues: labeled` caller (see `agent issue enable`). Everything here runs
+# in the CALLER repo's context: `github.event`, `actions/checkout`, and the minted
+# token all resolve to the calling repo, so one definition serves any repo.
+#
+# The runtime (issue_agent/agent.py) is baked into the runner image and derives
+# the repo's default branch + playbook itself, so nothing here is repo-specific.
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: Claude model id passed to the agent (AGENT_MODEL).
+        type: string
+        required: false
+        # claude-model: manual bump per Claude release (no Renovate datasource
+        # tracks Anthropic model IDs). One source of truth for every consumer.
+        default: claude-opus-4-8
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: Claude Code subscription token the Agent SDK consumes.
+        required: true
+
+jobs:
+  triage-and-fix:
+    # Matches runnerScaleSetName in the gitops-homelab ARC scale set.
+    runs-on: homelab-runners
+    # Hold the live session up to ~49 min (MAX_RUNTIME_SECONDS); the job timeout
+    # is a little higher so the wrapper persists + exits cleanly first.
+    timeout-minutes: 55
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      # Mint a short-lived (~1h) GitHub App installation token from the PEM
+      # mounted into the runner pod (brujoand-agent App). Must run BEFORE checkout
+      # — the checkout token is what it mints. The App key never leaves the mounted
+      # file. App-authored PRs still trigger downstream workflows.
+      - name: Mint GitHub App token
+        id: app-token
+        env:
+          PEM_PATH: /run/agent/private-key.pem
+        run: |
+          # `agent` is baked into the runner image so it exists before
+          # actions/checkout runs. No PAT fallback: a mint failure fails the job
+          # loudly (agent retries transient errors, fails fast on any other 4xx).
+          token="$(APP_ID="${AGENT_APP_ID}" APP_INSTALLATION_ID="${AGENT_APP_INSTALLATION_ID}" agent github token)"
+          if [[ -z "$token" ]]; then
+            echo "::error::App-token mint returned no token" >&2
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          printf 'token=%s\n' "$token" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          # App installation token so the PR opened below is authored by the App
+          # (a real, non-github-actions[bot] identity), which DOES trigger
+          # downstream workflows.
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Install mise
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
+
+      - name: Run interactive issue agent
+        # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY and MinIO creds are injected
+        # into every runner pod via the scale-set HelmRelease (envFrom).
+        env:
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          MINIO_ENDPOINT_URL: http://minio.data.svc.cluster.local:80
+          MINIO_BUCKET: issue-agent-sessions
+          AGENT_MODEL: ${{ inputs.model }}
+          MAX_RUNTIME_SECONDS: "2940"
+        run: |
+          PYTHONPATH=/opt/issue-agent \
+            /opt/issue-agent/venv/bin/python /opt/issue-agent/agent.py

@@ -1,0 +1,21 @@
+# Managed by `agent issue enable`. Thin caller of the shared reusable workflow
+# in brujoand/agent — put logic changes in the reusable workflow there, not here.
+#
+# Cold-start / timeout-recovery for the issue agent: on an `agent`-labelled issue,
+# any human comment re-runs the wrapper, which resumes the persisted session and
+# continues. The authorization guard (human, positive association) lives in the
+# reusable workflow.
+name: Claude issue agent resume
+
+on:
+  issue_comment:
+    types: [created]
+
+concurrency:
+  group: issue-agent-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  resume:
+    uses: brujoand/agent/.github/workflows/issue-resume.reusable.yml@{ref}
+    secrets: inherit

@@ -1,0 +1,25 @@
+# Managed by `agent issue enable`. Thin caller of the shared reusable workflow
+# in brujoand/agent — put logic changes in the reusable workflow there, not here.
+#
+# Summoning the agent: an authorized human mentioning `@brujoand-agent` on a
+# thread that does NOT yet carry the `agent` label adds that label (which is what
+# actually starts the agent). The mention + authorization guard lives in the
+# reusable workflow.
+name: Agent label on mention
+
+on:
+  issue_comment:
+    types: [created]
+  issues:
+    types: [opened]
+  pull_request:
+    types: [opened]
+
+concurrency:
+  group: agent-label-${{ github.event.issue.number || github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  add-label:
+    uses: brujoand/agent/.github/workflows/agent-label.reusable.yml@{ref}
+    secrets: inherit

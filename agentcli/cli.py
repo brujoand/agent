@@ -7,6 +7,7 @@ from agentcli import (
     doctor,
     github,
     install,
+    issue_enable,
     labpass,
     pull,
     repos,
@@ -24,6 +25,9 @@ app = typer.Typer(
 
 github_app = typer.Typer(name="github", help="brujoand-agent App tokens", no_args_is_help=True)
 workspace_app = typer.Typer(name="workspace", help="Session worktrees", no_args_is_help=True)
+issue_app = typer.Typer(
+    name="issue", help="Enable the interactive issue agent on a repo.", no_args_is_help=True
+)
 setup_app = typer.Typer(
     name="setup",
     help="Human-only privileged setup. Refuses to run with agent credentials.",
@@ -32,6 +36,7 @@ setup_app = typer.Typer(
 
 app.add_typer(github_app)
 app.add_typer(workspace_app)
+app.add_typer(issue_app)
 app.add_typer(setup_app)
 
 
@@ -64,6 +69,31 @@ def doctor_command() -> None:
 def github_token(refresh: bool = typer.Option(False, "--refresh", "-f")) -> None:
     """Print a short-lived installation token. Only the token reaches stdout."""
     print(github.token(force=refresh))
+
+
+# Dry-run by default (like `setup rulesets`): --apply is the one that writes. The
+# labels + caller workflows are the App's own job, so this is NOT human-only.
+@issue_app.command("enable")
+def issue_enable_command(
+    repo: str = typer.Argument(..., help="owner/repo to enable the agent on"),
+    ref: str = typer.Option(
+        "main", "--ref", help="git ref of brujoand/agent to pin the reusable workflows at"
+    ),
+    apply: bool = typer.Option(False, "--apply", help="Create labels. Without it, only plan."),
+    open_pr: bool = typer.Option(
+        False, "--open-pr", help="With --apply, open a PR adding the callers instead of printing."
+    ),
+) -> None:
+    """Create the agent labels and lay down the caller workflows on a repo.
+
+    Prints a human-only checklist for the steps the App cannot do (Actions
+    secret, reusable-workflow access, runner group, branch protection).
+    """
+    try:
+        raise typer.Exit(issue_enable.run(repo, ref=ref, apply=apply, open_pr=open_pr))
+    except AgentError as err:
+        print(f"ERROR: {err}")
+        raise typer.Exit(1) from err
 
 
 # Dry-run by default: this rewrites branch protections across the whole fleet, so
