@@ -14,7 +14,12 @@ from claude_agent_sdk import (
     project_key_for_directory,
 )
 from providers.base import SessionConfig
-from providers.claude import ALLOWED_TOOLS, MAX_TURNS, ClaudeProvider
+from providers.claude import (
+    MAX_TURNS,
+    TOOL_POLICY,
+    ClaudeProvider,
+    allowed_tools_for,
+)
 
 
 class FakeSDKClient:
@@ -151,7 +156,27 @@ def test_open_session_fresh_sets_session_id(monkeypatch):
     assert opts.max_turns == MAX_TURNS
     assert opts.permission_mode == "acceptEdits"
     assert opts.setting_sources == ["project"]
-    assert opts.allowed_tools == ALLOWED_TOOLS
+    # CFG has the default kind ("issue") -> the full policy, incl. cluster reads.
+    assert opts.allowed_tools == TOOL_POLICY["issue"]
+    assert "Bash(kubectl:*)" in opts.allowed_tools
+
+
+def test_open_session_pr_kind_drops_cluster_read_tools(monkeypatch):
+    cfg = SessionConfig(model="m", cwd="/work", session_id="sid-1", kind="pr")
+    session = open_faked_session(monkeypatch, cfg, [])
+    opts = session._client.options
+    assert opts.allowed_tools == TOOL_POLICY["pr"]
+    # The PR agent works a checked-out diff, not the live cluster.
+    assert "Bash(kubectl:*)" not in opts.allowed_tools
+    assert "Bash(curl:*)" not in opts.allowed_tools
+    # ...but still keeps the git/gh plumbing it needs to push and comment.
+    assert "Bash(git:*)" in opts.allowed_tools
+    assert "Bash(gh:*)" in opts.allowed_tools
+
+
+def test_allowed_tools_for_unknown_kind_falls_back_to_issue():
+    # A future/unknown role must fail open to today's broadest set, not lose tools.
+    assert allowed_tools_for("something-new") == TOOL_POLICY["issue"]
 
 
 def test_open_session_resume_sets_resume(monkeypatch):
