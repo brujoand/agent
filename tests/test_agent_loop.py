@@ -19,6 +19,18 @@ def test_done_marker_paired_and_bare():
     assert agent.DONE_MARKER in paired
     assert agent.DONE_RE.search(paired).group(1).strip() == "Opened #12."
 
+
+def test_run_record_formats_status_and_source(monkeypatch):
+    monkeypatch.setenv("TRIGGER_SOURCE", "autopilot-schedule")
+    line = agent.run_record("paused")
+    assert "Run paused" in line
+    assert "autopilot-schedule" in line
+
+
+def test_run_record_defaults_source_to_human(monkeypatch):
+    monkeypatch.delenv("TRIGGER_SOURCE", raising=False)
+    assert "human" in agent.run_record("completed")
+
     bare = "work done\n<<<DONE>>>"
     assert agent.DONE_MARKER in bare
     assert agent.DONE_RE.search(bare) is None  # falls back to footer-only comment
@@ -122,6 +134,20 @@ def test_run_done_on_first_turn(monkeypatch):
     assert len(comments) == 1
     assert "Fixed it in #99." in comments[0]
     assert "Session ended" in comments[0]
+
+
+def test_run_done_comment_carries_run_record(monkeypatch):
+    monkeypatch.setenv("TRIGGER_SOURCE", "autopilot-schedule")
+    session = FakeSession(
+        [TurnResult(text="<<<DONE>>>\nDone.\n<<<END_DONE>>>", usage=TurnUsage(num_turns=1))]
+    )
+    comments = []
+    code, _ = run_loop(monkeypatch, session, comments)
+
+    assert code == 0
+    # The closing comment is auditable: outcome + trigger provenance.
+    assert "Run completed" in comments[0]
+    assert "autopilot-schedule" in comments[0]
 
 
 def test_run_nudges_when_no_marker(monkeypatch):

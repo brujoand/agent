@@ -31,7 +31,10 @@ from providers.base import SessionConfig, TurnResult, TurnUsage
 # whole session.
 MAX_TURNS = 50
 
-ALLOWED_TOOLS = [
+# Tools every session gets regardless of role: read/search, edit, delegate to a
+# subagent, and the git/gh/pre-commit/mise plumbing both the issue and PR agents
+# need to investigate a repo and open or update a PR.
+_COMMON_TOOLS = [
     "Read",
     "Glob",
     "Grep",
@@ -42,12 +45,32 @@ ALLOWED_TOOLS = [
     "Bash(gh:*)",
     "Bash(pre-commit:*)",
     "Bash(mise:*)",
+]
+
+# Live-cluster read access. Only the issue/triage agent inspects cluster state
+# (kubectl) and curls the in-cluster observability HTTP APIs directly — `lab`
+# would need pods/exec + port-forward (privilege the read-only `view` SA
+# deliberately lacks), so curling the Service endpoints stays read-only. The PR
+# agent works a checked-out diff on a feature branch and has no business reaching
+# the live cluster, so it does not get these (least privilege per role).
+_CLUSTER_READ_TOOLS = [
     "Bash(kubectl:*)",
-    # Query the in-cluster observability HTTP APIs directly. `lab` would
-    # need pods/exec + port-forward (privilege the read-only `view` SA
-    # deliberately lacks); curling the Service endpoints stays read-only.
     "Bash(curl:*)",
 ]
+
+# SessionConfig.kind -> allowed tools. "issue" keeps today's full set unchanged;
+# "pr" drops live-cluster reads.
+TOOL_POLICY = {
+    "issue": _COMMON_TOOLS + _CLUSTER_READ_TOOLS,
+    "pr": _COMMON_TOOLS,
+}
+
+
+def allowed_tools_for(kind: str) -> list[str]:
+    """Tool allowlist for a session role. An unknown kind falls back to the
+    broadest ("issue") policy: the wrapper only ever passes "issue"/"pr", and a
+    future mode should fail open to today's behaviour, not silently lose tools."""
+    return TOOL_POLICY.get(kind, TOOL_POLICY["issue"])
 
 
 def _env_required(name: str) -> str:
@@ -95,7 +118,7 @@ class ClaudeProvider:
             max_turns=MAX_TURNS,
             permission_mode="acceptEdits",
             setting_sources=["project"],  # load CLAUDE.md + .claude/agents/
-            allowed_tools=ALLOWED_TOOLS,
+            allowed_tools=allowed_tools_for(config.kind),
             session_store=self._store,
             # Operate on the checked-out repo (Actions sets GITHUB_WORKSPACE),
             # not the wrapper's own dir.

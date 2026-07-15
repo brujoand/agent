@@ -31,6 +31,12 @@ class SessionConfig:
     session_id: str
     # Continue a persisted session instead of starting fresh.
     resume: bool = False
+    # The session's role: "issue" (triage/fix) or "pr" (address review feedback).
+    # Provider-neutral on purpose — the wrapper knows the role (TARGET_KIND) but
+    # not what it implies; each adapter maps it to its own policy (e.g. the Claude
+    # adapter narrows the tool allowlist for "pr"). Unknown values are the
+    # adapter's to interpret; the default keeps single-mode callers unchanged.
+    kind: str = "issue"
 
 
 @dataclass(frozen=True)

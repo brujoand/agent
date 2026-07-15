@@ -48,6 +48,10 @@ Environment:
   MAX_RUNTIME_SECONDS  (optional) default 2940 (49 min); exit cleanly before the
                        GitHub job timeout-minutes kills the pod.
   POLL_INTERVAL_SECONDS(optional) default 20
+  TRIGGER_SOURCE       (optional) default "human"; provenance stamped on the
+                       run-record (terminal comment + job summary). Autopilot
+                       workflows set e.g. "autopilot-schedule" so an unattended
+                       run is distinguishable from a human-labelled one.
   AGENT_BASE_BRANCH    (optional) PR base branch; default = the target repo's
                        default branch (queried via gh), else main
   AGENT_PLAYBOOK       (optional) repo-relative playbook path; default
@@ -223,6 +227,18 @@ def with_runner_context(note: str, verb: str = "Running in") -> str:
     tenses it per note (e.g. "Running in" vs "Was running in" vs "Ran in")."""
     where = runner_context()
     return f"{note}\n\n{verb} {where}." if where else note
+
+
+def run_record(status: str) -> str:
+    """A compact, greppable provenance line for a terminal run, appended to the
+    ended/paused comment and the job summary so an unattended run is auditable
+    from the thread. ``status`` is the run's outcome (completed / paused).
+    ``TRIGGER_SOURCE`` (default ``human``) is stamped by the invoking workflow —
+    an autopilot names its trigger (e.g. ``autopilot-schedule``) so a reader can
+    tell an unprompted run from a human-labelled one. The run URL/pod already
+    ride the runner-context footer, so this adds only the source+status it omits."""
+    source = env("TRIGGER_SOURCE", "human")
+    return f":card_index_dividers: **Run {status}** · trigger `{source}`"
 
 
 def already_announced(view_cmd: str, repo: str, issue: str) -> bool:
@@ -421,7 +437,7 @@ class UsageTracker:
         except (urllib.error.URLError, OSError) as exc:
             print(f"pushgateway push failed (non-fatal): {exc}", file=sys.stderr)
 
-    def write_job_summary(self) -> None:
+    def write_job_summary(self, status: str = "completed") -> None:
         path = os.environ.get("GITHUB_STEP_SUMMARY")
         if not path:
             return
@@ -432,6 +448,10 @@ class UsageTracker:
         )
         cache_ratio = self.tokens["cache_read_input_tokens"] / cache_denom if cache_denom else 0.0
         with open(path, "a", encoding="utf-8") as fh:
+            # Run-record header: same source+status provenance as the terminal
+            # comment (run_record()), so a scheduled/autopilot run is auditable
+            # from the Actions summary too, not just the issue thread.
+            fh.write(f"{run_record(status)}\n\n")
             fh.write(
                 f"### Claude usage (issue #{self.issue}, {self.model})\n\n"
                 f"| metric | value |\n|---|---|\n"
@@ -608,7 +628,10 @@ async def run() -> int:
         file=sys.stderr,
     )
 
-    cfg = SessionConfig(model=model, cwd=cwd, session_id=sid, resume=resume)
+    # Pass the role through so the provider can scope per-mode policy (the Claude
+    # adapter narrows the tool allowlist for "pr" vs "issue"). `kind` is already
+    # "issue"/"pr" from TARGET_KIND above.
+    cfg = SessionConfig(model=model, cwd=cwd, session_id=sid, resume=resume, kind=kind)
 
     usage = UsageTracker(issue=issue, model=model)
 
@@ -664,7 +687,9 @@ async def run() -> int:
                     view_cmd,
                     issue,
                     repo,
-                    with_runner_context(pause_note, "Was running in"),
+                    with_runner_context(
+                        f"{pause_note}\n\n{run_record('paused')}", "Was running in"
+                    ),
                 )
                 # `agent-waiting` is an issue-only handoff signal; PRs have no
                 # such label and the resume path there is any human comment.
@@ -679,7 +704,7 @@ async def run() -> int:
                         "agent-waiting",
                     )
                 print("runtime budget reached; paused", file=sys.stderr)
-                usage.write_job_summary()
+                usage.write_job_summary(status="paused")
                 return 0
 
             turn = await session.run_turn(prompt)
@@ -736,6 +761,7 @@ async def run() -> int:
                     "persisted transcript."
                 )
                 body = f"{summary}\n\n---\n{ended_footer}" if summary else ended_footer
+                body = f"{body}\n\n{run_record('completed')}"
                 post_comment(view_cmd, issue, repo, with_runner_context(body, "Ran in"))
                 print("agent signalled DONE", file=sys.stderr)
                 usage.write_job_summary()
