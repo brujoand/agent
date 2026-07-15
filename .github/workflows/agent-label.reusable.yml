@@ -1,0 +1,69 @@
+name: Agent label on mention (reusable)
+
+# Reusable summon path. Called from a caller triggering on issue/PR open + comment
+# create. An authorized human mentioning `@brujoand-agent` on a thread that does
+# NOT yet carry the `agent` label adds it — which is what starts the agent. The
+# label is added with the App token (not the default GITHUB_TOKEN) so the
+# resulting `labeled` event triggers the downstream workflows.
+
+on:
+  workflow_call:
+    secrets: {}
+
+jobs:
+  add-label:
+    # Fire only when: the actor is human; the triggering text mentions
+    # @brujoand-agent; the thread is not already labelled `agent`; and the actor
+    # is authorized. Association is read from the object acted on for THIS event.
+    if: >-
+      github.event.sender.type != 'Bot' &&
+      contains(github.event.comment.body || github.event.issue.body || github.event.pull_request.body, '@brujoand-agent') &&
+      !contains(github.event.issue.labels.*.name, 'agent') &&
+      !contains(github.event.pull_request.labels.*.name, 'agent') &&
+      (
+        (github.event_name == 'issue_comment' &&
+          (github.event.comment.author_association == 'OWNER' ||
+           github.event.comment.author_association == 'MEMBER' ||
+           github.event.comment.author_association == 'COLLABORATOR' ||
+           github.event.comment.user.login == 'brujoand')) ||
+        (github.event_name == 'issues' &&
+          (github.event.issue.author_association == 'OWNER' ||
+           github.event.issue.author_association == 'MEMBER' ||
+           github.event.issue.author_association == 'COLLABORATOR' ||
+           github.event.issue.user.login == 'brujoand')) ||
+        (github.event_name == 'pull_request' &&
+          (github.event.pull_request.author_association == 'OWNER' ||
+           github.event.pull_request.author_association == 'MEMBER' ||
+           github.event.pull_request.author_association == 'COLLABORATOR' ||
+           github.event.pull_request.user.login == 'brujoand'))
+      )
+    runs-on: homelab-runners
+    timeout-minutes: 5
+    permissions:
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Mint GitHub App token
+        id: app-token
+        env:
+          PEM_PATH: /run/agent/private-key.pem
+        run: |
+          token="$(APP_ID="${AGENT_APP_ID}" APP_INSTALLATION_ID="${AGENT_APP_INSTALLATION_ID}" agent github token)"
+          if [[ -z "$token" ]]; then
+            echo "::error::App-token mint returned no token" >&2
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          printf 'token=%s\n' "$token" >> "$GITHUB_OUTPUT"
+
+      - name: Add the agent label
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          NUM: ${{ github.event.issue.number || github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          # PRs are issues in the REST API, so /issues/{n}/labels covers both.
+          # Additive (does not clobber other labels) and idempotent if present.
+          gh api --method POST "repos/${REPO}/issues/${NUM}/labels" \
+            -f "labels[]=agent"
+          echo "added 'agent' label to #${NUM}"

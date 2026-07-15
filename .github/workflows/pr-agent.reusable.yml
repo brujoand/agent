@@ -1,0 +1,82 @@
+name: Claude PR agent (reusable)
+
+# Reusable PR-scoped session. Called from an `issue_comment` /
+# `pull_request_review_comment` caller. Runs the same wrapper as the issue agent
+# in TARGET_KIND=pr mode, checking out the PR's head branch so the agent can push
+# follow-up commits to it (never the default branch). Guard lives here.
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        type: string
+        required: false
+        default: claude-opus-4-8
+    secrets:
+      CLAUDE_CODE_OAUTH_TOKEN:
+        required: true
+
+jobs:
+  respond:
+    # issue_comment fires for issues and PRs; require a PR here (the issue path is
+    # owned by issue-resume). Wake only when `agent`-labelled, on an authorized
+    # human comment. The label lives at issue.labels for an issue_comment and at
+    # pull_request.labels for a review comment.
+    if: >-
+      (github.event.issue.pull_request || github.event_name == 'pull_request_review_comment') &&
+      github.event.comment.user.type != 'Bot' &&
+      (github.event.comment.author_association == 'OWNER' ||
+       github.event.comment.author_association == 'MEMBER' ||
+       github.event.comment.author_association == 'COLLABORATOR' ||
+       github.event.comment.user.login == 'brujoand') &&
+      (contains(github.event.issue.labels.*.name, 'agent') ||
+       contains(github.event.pull_request.labels.*.name, 'agent'))
+    runs-on: homelab-runners
+    timeout-minutes: 55
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    steps:
+      - name: Resolve PR number
+        id: pr
+        env:
+          NUM: ${{ github.event.issue.number || github.event.pull_request.number }}
+        run: echo "number=$NUM" >> "$GITHUB_OUTPUT"
+
+      - name: Mint GitHub App token
+        id: app-token
+        env:
+          PEM_PATH: /run/agent/private-key.pem
+        run: |
+          token="$(APP_ID="${AGENT_APP_ID}" APP_INSTALLATION_ID="${AGENT_APP_INSTALLATION_ID}" agent github token)"
+          if [[ -z "$token" ]]; then
+            echo "::error::App-token mint returned no token" >&2
+            exit 1
+          fi
+          echo "::add-mask::$token"
+          printf 'token=%s\n' "$token" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout PR branch
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          fetch-depth: 0
+          ref: refs/pull/${{ steps.pr.outputs.number }}/head
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Install mise
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
+
+      - name: Run interactive PR agent
+        env:
+          TARGET_KIND: pr
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          MINIO_ENDPOINT_URL: http://minio.data.svc.cluster.local:80
+          MINIO_BUCKET: issue-agent-sessions
+          AGENT_MODEL: ${{ inputs.model }}
+          MAX_RUNTIME_SECONDS: "2940"
+        run: |
+          PYTHONPATH=/opt/issue-agent \
+            /opt/issue-agent/venv/bin/python /opt/issue-agent/agent.py

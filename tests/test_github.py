@@ -115,3 +115,31 @@ def test_force_refresh_bypasses_valid_cache(monkeypatch):
     github._write_cache("ghs_valid", int(time.time()) + 3600)
     monkeypatch.setattr(github, "mint", lambda creds=None: ("ghs_forced", int(time.time()) + 3600))
     assert github.token(force=True) == "ghs_forced"
+
+
+def test_api_post_sends_json_body_with_bearer(monkeypatch, httpx_mock):
+    monkeypatch.setattr(github, "token", lambda: "ghs_api")
+    httpx_mock.add_response(
+        method="POST",
+        url="https://api.github.com/repos/brujoand/x/labels",
+        status_code=201,
+        json={"name": "agent"},
+    )
+    resp = github.api_post("/repos/brujoand/x/labels", {"name": "agent"})
+    assert resp.status_code == 201
+    request = httpx_mock.get_requests()[0]
+    assert request.headers["Authorization"] == "Bearer ghs_api"
+    assert json.loads(request.content) == {"name": "agent"}
+
+
+def test_api_put_sends_json_body(monkeypatch, httpx_mock):
+    monkeypatch.setattr(github, "token", lambda: "ghs_api")
+    httpx_mock.add_response(
+        method="PUT",
+        url="https://api.github.com/repos/brujoand/x/contents/f",
+        status_code=200,
+        json={"content": {}},
+    )
+    resp = github.api_put("/repos/brujoand/x/contents/f", {"message": "m"})
+    assert resp.status_code == 200
+    assert json.loads(httpx_mock.get_requests()[0].content) == {"message": "m"}

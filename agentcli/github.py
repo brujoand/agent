@@ -179,15 +179,21 @@ def token_expires_in() -> int:
     return max(0, int(data.get("expires_at", 0) - time.time()))
 
 
+def _api_headers() -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {token()}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+
 def api_get(path: str, params: dict | None = None) -> httpx.Response:
-    response = httpx.get(
-        f"{GITHUB_API}{path}",
-        headers={
-            "Authorization": f"Bearer {token()}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-        },
-        params=params,
-        timeout=20.0,
-    )
-    return response
+    return httpx.get(f"{GITHUB_API}{path}", headers=_api_headers(), params=params, timeout=20.0)
+
+
+def api_post(path: str, json_body: dict | None = None) -> httpx.Response:
+    return httpx.post(f"{GITHUB_API}{path}", headers=_api_headers(), json=json_body, timeout=20.0)
+
+
+def api_put(path: str, json_body: dict | None = None) -> httpx.Response:
+    return httpx.put(f"{GITHUB_API}{path}", headers=_api_headers(), json=json_body, timeout=20.0)
