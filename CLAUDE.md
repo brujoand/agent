@@ -25,10 +25,15 @@ job), but the convention holds.
 `workspace.py` (session worktrees), `pull.py` + `repos.py` (repo sync),
 `install.py`, `doctor.py`, `creds.py`/`labpass.py`, `config.py`, `errors.py`.
 
-`issue_agent/` is **vendored, not ours to reformat** — `s3_session_store.py` comes
-verbatim from the Claude Agent SDK examples and `agent.py` moved here unchanged
-from gitops-homelab. It is excluded from ruff and runs in its own
-`/opt/issue-agent` venv.
+`issue_agent/` is the interactive issue/PR agent, run as a flat script in its
+own `/opt/issue-agent` venv: `agent.py` (the wrapper: ASK/DONE marker flow,
+GitHub polling, usage metrics) and `providers/` (the LLM seam — `base.py`
+protocol + neutral types, `claude.py` Claude Agent SDK adapter, env-driven
+factory via `AGENT_PROVIDER`, default `claude`). Both are ours: lint-covered
+and tested from `tests/` (a `conftest.py` shim puts `issue_agent/` on
+`sys.path`, and `claude-agent-sdk` is a dev dep for the adapter tests). Only
+`s3_session_store.py` remains **vendored verbatim** from the Claude Agent SDK
+examples and excluded from ruff.
 
 `bootstrap.sh` installs an isolated copy into `~/.local/bin` via `uv tool install`.
 
@@ -58,6 +63,9 @@ pre-commit run --files <changed files>
   call the other. Keep the `iat` backdate, `exp` window, and retry classification
   in sync.
 - **Python is pinned to 3.12** to match the CI runner image, which bakes in
-  `agentcli`. The `python-min-version` pre-commit hook parses `agentcli/` under
-  3.12 to catch 3.13+ syntax.
+  `agentcli`. The `python-min-version` pre-commit hook parses `agentcli/` and
+  `issue_agent/` under 3.12 to catch 3.13+ syntax.
+- **`claude-agent-sdk` is pinned twice on purpose** — `issue_agent/requirements.txt`
+  (the runtime venv) and the pyproject dev-dependencies (so tests import real SDK
+  types). Keep the pins in sync; both carry a comment saying so.
 - This repo handles a private key. `gitleaks` runs in pre-commit; keep it that way.

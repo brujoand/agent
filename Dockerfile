@@ -42,7 +42,7 @@ COPY issue_agent/ /opt/issue-agent/
 RUN python3 -m venv /opt/issue-agent/venv \
  && /opt/issue-agent/venv/bin/pip install --no-cache-dir \
       -r /opt/issue-agent/requirements.txt \
- && /opt/issue-agent/venv/bin/python -c "import claude_agent_sdk, boto3"
+ && /opt/issue-agent/venv/bin/python -c "import sys; sys.path.insert(0, '/opt/issue-agent'); import agent, providers.claude, boto3"
 
 # The agent CLI. Baked in so it exists BEFORE `actions/checkout` runs -- the
 # checkout token is what it mints. That ordering is the whole reason the mint
