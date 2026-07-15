@@ -48,6 +48,11 @@ Environment:
   MAX_RUNTIME_SECONDS  (optional) default 2940 (49 min); exit cleanly before the
                        GitHub job timeout-minutes kills the pod.
   POLL_INTERVAL_SECONDS(optional) default 20
+  AGENT_BASE_BRANCH    (optional) PR base branch; default = the target repo's
+                       default branch (queried via gh), else main
+  AGENT_PLAYBOOK       (optional) repo-relative playbook path; default
+                       .claude/commands/triage-and-fix.md, falling back to the
+                       generic default-playbook.md shipped beside this wrapper
 
 Claude provider only (AGENT_PROVIDER=claude):
   CLAUDE_CODE_OAUTH_TOKEN (required) consumed by the Claude Code CLI the SDK runs
@@ -440,17 +445,60 @@ class UsageTracker:
             )
 
 
+# The generic triage-and-fix playbook baked beside this wrapper (image path
+# /opt/issue-agent/default-playbook.md). Used when the target repo ships no
+# playbook of its own — resolved by absolute path so the agent can Read it even
+# though the session's cwd is the checked-out repo.
+DEFAULT_PLAYBOOK = os.path.join(os.path.dirname(os.path.abspath(__file__)), "default-playbook.md")
+
+
+def default_branch_for(repo: str) -> str:
+    """The PR base branch for ``repo``.
+
+    ``AGENT_BASE_BRANCH`` overrides; otherwise ask GitHub (reliable even on a
+    fresh/shallow ``actions/checkout`` where ``origin/HEAD`` may be unset),
+    falling back to ``main`` if the query returns nothing.
+    """
+    override = env("AGENT_BASE_BRANCH")
+    if override:
+        return override
+    branch = gh(
+        "repo",
+        "view",
+        repo,
+        "--json",
+        "defaultBranchRef",
+        "-q",
+        ".defaultBranchRef.name",
+        check=False,
+    )
+    return branch or "main"
+
+
+def resolve_playbook(cwd: str) -> str:
+    """Path the seed prompt points the agent at as its triage-and-fix playbook.
+
+    Prefer the target repo's own playbook (``AGENT_PLAYBOOK``, default
+    ``.claude/commands/triage-and-fix.md``) when it exists in the checkout, so a
+    repo can tailor the flow (gitops-homelab does). Otherwise fall back to the
+    generic ``DEFAULT_PLAYBOOK`` shipped with the agent, so a repo that enables
+    the agent without authoring its own playbook still works out of the box.
+    """
+    rel = env("AGENT_PLAYBOOK", ".claude/commands/triage-and-fix.md")
+    return rel if os.path.exists(os.path.join(cwd, rel)) else DEFAULT_PLAYBOOK
+
+
 SEED_PROMPT = """\
-You are the autonomous issue agent for the gitops-homelab repo, running in a CI
-runner with a LIVE multi-turn session. Read CLAUDE.md and follow
-`.claude/commands/triage-and-fix.md` as your playbook. The target issue is
+You are the autonomous issue agent for the {repo} repo, running in a CI
+runner with a LIVE multi-turn session. Read CLAUDE.md and follow the playbook at
+`{playbook}` (open it with the Read tool). The target issue is
 **#{issue}** in repo {repo}.
 
-**HARD RULE — you are a non-interactive agent: NEVER push to `main`, NEVER
+**HARD RULE — you are a non-interactive agent: NEVER push to `{base}`, NEVER
 force-push, and NEVER merge a PR.** Every fix you make goes on a feature
-branch and lands via a PR (`gh pr create --base main`); ONLY the human
-merges it. `main` is protected by a server-side ruleset (PR required, direct
-pushes rejected), so a direct push or merge from this runner cannot succeed
+branch and lands via a PR (`gh pr create --base {base}`); ONLY the human
+merges it. Where `{base}` is protected by a server-side ruleset (PR required,
+direct pushes rejected), a direct push or merge from this runner cannot succeed
 regardless. No approving review is required — just open the PR and stop.
 
 You control the conversation flow with these markers — emit them literally in
@@ -482,22 +530,23 @@ your reply text:
 
 Do not ask about anything you can answer yourself from the repo. Be decisive
 once you have enough information. Begin now: read the issue with
-`gh issue view {issue} --repo {repo} --comments`, investigate (delegate to the
-codebase-investigator subagent via the Task tool), then ask or act.
+`gh issue view {issue} --repo {repo} --comments`, investigate (delegate
+read-heavy exploration via the Task tool where the repo defines subagents for
+it), then ask or act.
 """
 
 
 PR_SEED_PROMPT = """\
-You are the autonomous PR agent for the gitops-homelab repo, running in a CI
-runner with a LIVE multi-turn session. Read CLAUDE.md and the relevant
-`.claude/rules/*.md`. A human invoked you (via the `agent` label or a comment
-on the labelled PR) on **PR #{pr}** in repo {repo}. Its branch is checked out in
-your working directory.
+You are the autonomous PR agent for the {repo} repo, running in a CI
+runner with a LIVE multi-turn session. Read CLAUDE.md and any repo-specific
+conventions in `.claude/`. A human invoked you (via the `agent` label or a
+comment on the labelled PR) on **PR #{pr}** in repo {repo}. Its branch is
+checked out in your working directory.
 
-**HARD RULE — you are a non-interactive agent: NEVER push to `main`, NEVER
+**HARD RULE — you are a non-interactive agent: NEVER push to `{base}`, NEVER
 force-push, and NEVER merge a PR.** You may push new commits to THIS PR's
 feature branch to address the human's request (`git push` to the current
-branch, never `main`). ONLY the human merges.
+branch, never `{base}`). ONLY the human merges.
 
 You control the conversation flow with these markers — emit them literally:
 
@@ -546,6 +595,10 @@ async def run() -> int:
     sid = pr_session_id_for(repo, issue) if is_pr else session_id_for(repo, issue)
     provider = create_provider(provider_name)
     cwd = env("GITHUB_WORKSPACE", os.getcwd())
+    # Repo-specific bits of the seed prompt, so the same runtime serves any repo:
+    # the PR base branch and the playbook the agent should follow.
+    base = default_branch_for(repo)
+    playbook = resolve_playbook(cwd)
 
     # Decide fresh-vs-resume by probing the provider for THIS session's
     # persisted transcript (how it is keyed and stored is the adapter's business).
@@ -587,9 +640,11 @@ async def run() -> int:
                 if linked
                 else ""
             )
-            first_prompt = PR_SEED_PROMPT.format(pr=issue, repo=repo, issue_context=issue_context)
+            first_prompt = PR_SEED_PROMPT.format(
+                pr=issue, repo=repo, base=base, issue_context=issue_context
+            )
         else:
-            first_prompt = SEED_PROMPT.format(issue=issue, repo=repo)
+            first_prompt = SEED_PROMPT.format(issue=issue, repo=repo, base=base, playbook=playbook)
 
         prompt: str | None = first_prompt
         while True:
