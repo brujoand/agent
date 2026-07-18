@@ -1,9 +1,10 @@
 """Claude Agent SDK adapter.
 
-Everything Claude-specific lives here: the claude-agent-sdk client, the
-MinIO-backed session store (how THIS harness persists/resumes transcripts),
-and the Claude Code harness options (tool allowlist, permission mode). The
-wrapper in agent.py only sees the provider-neutral protocol from base.py.
+Everything Claude-specific lives here: the claude-agent-sdk client, an optional
+MinIO-backed session store (how THIS harness persists/resumes transcripts; when
+MinIO is unconfigured the session runs stateless), and the Claude Code harness
+options (tool allowlist, permission mode). The wrapper in agent.py only sees the
+provider-neutral protocol from base.py.
 
 Imports resolve script-relative (sys.path[0] == /opt/issue-agent at runtime;
 tests/conftest.py replicates that), so s3_session_store is a flat module.
@@ -84,12 +85,21 @@ def _env_required(name: str) -> str:
     return val
 
 
-def make_store() -> S3SessionStore:
+def make_store() -> S3SessionStore | None:
+    """The MinIO/S3 transcript store, or None when MinIO is not configured.
+
+    Persistence (and cross-timeout resume) is opt-in: without MINIO_ENDPOINT_URL
+    the runtime runs stateless — a fresh session each run, no resume. When the
+    endpoint IS set, the bucket and AWS creds become required."""
+    endpoint = os.environ.get("MINIO_ENDPOINT_URL")
+    if not endpoint:
+        return None
+
     import boto3  # lazy: only the live adapter needs it, tests inject a store
 
     client = boto3.client(
         "s3",
-        endpoint_url=_env_required("MINIO_ENDPOINT_URL"),
+        endpoint_url=endpoint,
         aws_access_key_id=_env_required("AWS_ACCESS_KEY_ID"),
         aws_secret_access_key=_env_required("AWS_SECRET_ACCESS_KEY"),
         region_name="us-east-1",  # ignored by MinIO but boto3 wants one
@@ -103,9 +113,14 @@ def make_store() -> S3SessionStore:
 
 class ClaudeProvider:
     def __init__(self, store: S3SessionStore | None = None) -> None:
+        # None from make_store() means "stateless" (no MinIO configured), which is
+        # a valid mode — not "use the default store". Tests inject a fake store.
         self._store = store if store is not None else make_store()
 
     async def session_exists(self, session_id: str, cwd: str) -> bool:
+        # Stateless (no store) never resumes: there is no persisted transcript.
+        if self._store is None:
+            return False
         # The SDK keys transcripts by a cwd-derived project_key (not the repo
         # slug), so derive it with the SDK's own helper and load the exact key.
         project_key = project_key_for_directory(cwd)
@@ -113,21 +128,21 @@ class ClaudeProvider:
         return bool(existing)
 
     def open_session(self, config: SessionConfig) -> ClaudeSession:
+        # Persistence is optional: pass session_store only when configured, and
+        # only resume when there is a store to resume from.
+        store_kwargs = {"session_store": self._store} if self._store is not None else {}
+        resume = config.resume and self._store is not None
         opts = ClaudeAgentOptions(
             model=config.model,
             max_turns=MAX_TURNS,
             permission_mode="acceptEdits",
             setting_sources=["project"],  # load CLAUDE.md + .claude/agents/
             allowed_tools=allowed_tools_for(config.kind),
-            session_store=self._store,
             # Operate on the checked-out repo (Actions sets GITHUB_WORKSPACE),
             # not the wrapper's own dir.
             cwd=config.cwd,
-            **(
-                {"resume": config.session_id}
-                if config.resume
-                else {"session_id": config.session_id}
-            ),
+            **store_kwargs,
+            **({"resume": config.session_id} if resume else {"session_id": config.session_id}),
         )
         return ClaudeSession(opts)
 

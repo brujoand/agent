@@ -57,12 +57,21 @@ Environment:
   AGENT_PLAYBOOK       (optional) repo-relative playbook path; default
                        .claude/commands/triage-and-fix.md, falling back to the
                        generic default-playbook.md shipped beside this wrapper
+  AGENT_BOT_LOGIN      (optional) the agent App's bare login (e.g. brujoand-agent);
+                       identifies the agent's own comments and forms the @mention
+                       handle. Set it to your App's login. Default: brujoand-agent.
+  PUSHGATEWAY_URL      (optional) Prometheus pushgateway for per-run token/cost
+                       metrics; unset = metrics disabled.
 
 Claude provider only (AGENT_PROVIDER=claude):
   CLAUDE_CODE_OAUTH_TOKEN (required) consumed by the Claude Code CLI the SDK runs
-  MINIO_ENDPOINT_URL   (required) e.g. http://minio.data.svc.cluster.local:80
-  MINIO_BUCKET         (required) e.g. issue-agent-sessions
-  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (required) bucket-scoped MinIO creds
+  MINIO_ENDPOINT_URL   (optional) e.g. http://minio.data.svc.cluster.local:80 —
+                       enables transcript persistence + resume across the Actions
+                       timeout. Omit all MINIO_*/AWS_* to run stateless (a fresh
+                       session each run; no cross-timeout resume).
+  MINIO_BUCKET         (required if MINIO_ENDPOINT_URL is set) e.g. issue-agent-sessions
+  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (required if MINIO_ENDPOINT_URL is set)
+                       bucket-scoped MinIO creds
 """
 
 from __future__ import annotations
@@ -107,14 +116,27 @@ DONE_RE = re.compile(r"<<<DONE>>>(.*?)<<<END_DONE>>>", re.DOTALL)
 # during the PAT era, when agent comments were indistinguishable from the
 # maintainer's. The App gives us a stable author again, and unlike the marker it
 # also covers the model's own comments (which never carried the marker).
-AGENT_BOT_LOGIN = "brujoand-agent"
+#
+# Configurable so the runtime serves any App: set AGENT_BOT_LOGIN to your App's
+# bare login (the reusable workflows pass it as a required input). It is what
+# tells the agent's own comments apart from a human's, so a WRONG value risks the
+# agent treating its own comments as replies — set it. The default is the
+# reference deployment's App.
+AGENT_BOT_LOGIN = os.environ.get("AGENT_BOT_LOGIN", "brujoand-agent")
+
+# The @mention handle used to summon the agent onto an unlabelled thread, derived
+# from the App login (e.g. `@brujoand-agent`). Named in status notes so a human
+# knows how to reach the agent; safe to name plainly because the workflow guards
+# key on author association, not comment body.
+AGENT_MENTION = f"@{AGENT_BOT_LOGIN}"
 
 # Leading line of the one-time startup banner (post_announcement). It doubles as
 # the idempotency key: a comment authored by AGENT_BOT_LOGIN containing this
 # exact string means the banner is already up, so the opener posts it once and
 # every later resume skips it. Same author+content idiom as issue_already_links_pr
-# — no in-body marker (see AGENT_BOT_LOGIN note).
-ANNOUNCE_LEAD = ":robot: **Claude agent is on it.**"
+# — no in-body marker (see AGENT_BOT_LOGIN note). Provider-neutral wording (the
+# backend is selectable via AGENT_PROVIDER).
+ANNOUNCE_LEAD = ":robot: **Agent is on it.**"
 
 
 def env(name: str, default: str | None = None, required: bool = False) -> str:
@@ -377,10 +399,11 @@ def issue_already_links_pr(repo: str, issue: str, pr_url: str) -> bool:
     return False
 
 
-PUSHGATEWAY_URL = os.environ.get(
-    "PUSHGATEWAY_URL",
-    "http://pushgateway.observability.svc.cluster.local:9091",
-)
+# Optional Prometheus pushgateway for per-run token/cost metrics. Unset by
+# default (no metrics) so the runtime is deployable without any metrics backend;
+# set PUSHGATEWAY_URL to enable (the reference deployment points it at an
+# in-cluster pushgateway via the workflow).
+PUSHGATEWAY_URL = os.environ.get("PUSHGATEWAY_URL", "")
 
 
 class UsageTracker:
@@ -415,6 +438,8 @@ class UsageTracker:
         self.push()
 
     def push(self) -> None:
+        if not PUSHGATEWAY_URL:
+            return  # metrics disabled (no pushgateway configured)
         labels = f'{{model="{self.model}"}}'
         lines = [
             f'claude_agent_tokens_total{{model="{self.model}",type="{k}"}} {v}'
@@ -680,7 +705,7 @@ async def run() -> int:
                 # agent can never re-trigger itself regardless of the body.
                 pause_note = (
                     ":hourglass: Paused (runtime budget reached). Reply here to "
-                    "resume (or mention `@brujoand-agent` if this thread isn't "
+                    f"resume (or mention `{AGENT_MENTION}` if this thread isn't "
                     "labelled `agent`) — I keep full context."
                 )
                 post_comment(
@@ -756,7 +781,7 @@ async def run() -> int:
                     ":checkered_flag: **Session ended — I'm no longer live on "
                     f"this {view_cmd}, so I'm not waiting for a reply here.** "
                     "To continue (answer a question, request a change), reply "
-                    "here (or mention `@brujoand-agent` if this thread isn't "
+                    f"here (or mention `{AGENT_MENTION}` if this thread isn't "
                     "labelled `agent`) — I resume with full context from the "
                     "persisted transcript."
                 )
@@ -792,7 +817,7 @@ async def run() -> int:
                 "in-process (no need to mention me while I'm live). "
                 "If I hit my runtime budget first I'll post a pause note; after "
                 "that, just reply here again to resume with full context (or "
-                "mention `@brujoand-agent` if this thread isn't labelled `agent`)."
+                f"mention `{AGENT_MENTION}` if this thread isn't labelled `agent`)."
             )
             post_comment(
                 view_cmd,
