@@ -1,16 +1,17 @@
 # Managed by `agent issue enable`. Thin caller of the shared reusable workflow
 # in brujoand/agent — put logic changes in the reusable workflow there, not here.
 #
-# One-shot verification review: when an `agent`-labelled PR is opened / reopened /
-# marked ready — or when the `agent` label is applied — the agent reads the PR
-# against its intent (the linked issue + description) and posts ONE review comment.
-# Never approves/blocks; a human still merges. The generic review prompt lives in
-# the reusable workflow; override it there or per-repo via .claude/ if needed.
+# One-shot verification review (opt-OUT): the agent reviews every non-draft PR
+# and posts ONE review comment, UNLESS the PR carries an `auto-merge` label. Never
+# approves/blocks; a human still merges. `labeled`/`unlabeled` are included so
+# adding or removing `auto-merge` re-evaluates; `synchronize` is deliberately NOT
+# (one review on open, not one per push). The generic review prompt lives in the
+# reusable workflow; override it there or per-repo via .claude/ if needed.
 name: PR review
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review, labeled]
+    types: [opened, reopened, ready_for_review, labeled, unlabeled]
 
 concurrency:
   group: pr-review-${{ github.event.pull_request.number }}
