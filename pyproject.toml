@@ -3,6 +3,8 @@ name = "agentcli"
 version = "0.1.0"
 description = "Agent CLI: credentials, repos, worktrees, and a lab wrapper"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
   "typer>=0.15.0",
   "httpx>=0.28.0",
