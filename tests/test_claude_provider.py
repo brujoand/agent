@@ -200,3 +200,32 @@ def test_session_exists_probes_store_with_sdk_project_key():
 def test_session_exists_false_when_store_empty():
     provider = ClaudeProvider(store=FakeStore(existing=None))
     assert anyio.run(provider.session_exists, "sid-1", "/work") is False
+
+
+def test_make_store_none_without_minio(monkeypatch):
+    import providers.claude as claude
+
+    # Stateless mode: no MinIO configured -> no store, so nothing to persist.
+    monkeypatch.delenv("MINIO_ENDPOINT_URL", raising=False)
+    assert claude.make_store() is None
+
+
+def test_stateless_provider_never_resumes(monkeypatch):
+    import providers.claude as claude
+
+    # No MinIO configured -> ClaudeProvider(store=None) resolves to a stateless
+    # provider (make_store() returns None).
+    monkeypatch.delenv("MINIO_ENDPOINT_URL", raising=False)
+    monkeypatch.setattr(claude, "ClaudeSDKClient", FakeSDKClient)
+    provider = ClaudeProvider(store=None)
+    assert provider._store is None
+
+    # Reports no existing session, and opens a fresh one WITHOUT a session_store
+    # even though the config asks to resume (nothing to resume from).
+    assert anyio.run(provider.session_exists, "sid-1", "/work") is False
+
+    cfg = SessionConfig(model="m", cwd="/work", session_id="sid-1", resume=True)
+    opts = provider.open_session(cfg)._client.options
+    assert opts.session_store is None
+    assert opts.resume is None
+    assert opts.session_id == "sid-1"
