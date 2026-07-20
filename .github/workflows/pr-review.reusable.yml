@@ -4,10 +4,12 @@ name: PR review (reusable)
 # PR against its intent (the linked issue + description) plus quality/security and
 # posts ONE review comment. Never approves/blocks — a human merges.
 #
-# This is the GENERIC review (no repo-specific rendering). gitops-homelab keeps
-# its own konflate-flavoured pr-review.yml and does NOT call this one. A consumer
-# that wants tailored review criteria overrides `review_prompt`, or drops repo
-# conventions in CLAUDE.md / .claude/ (which the reviewer reads).
+# Opt-OUT: reviews every non-draft PR EXCEPT those carrying an `auto-merge` label
+# (tag the PRs you are auto-merging so they skip review; everything else is
+# reviewed by default). A consumer that wants tailored criteria overrides
+# `review_prompt`, or drops repo conventions in CLAUDE.md / .claude/ (which the
+# reviewer reads). Repo-specific review flavours (e.g. a rendered-manifest diff)
+# stay in that repo's own workflow rather than here.
 
 on:
   workflow_call:
@@ -16,6 +18,19 @@ on:
         type: string
         required: false
         default: claude-opus-4-8
+      runner:
+        description: runs-on label for the review job.
+        type: string
+        required: false
+        default: ubuntu-latest
+      allowed_bots:
+        description: >-
+          claude-code-action allowed_bots. Opt-out reviews bot-authored PRs too
+          (unless auto-merge-labelled) and the action refuses non-human actors
+          unless allow-listed, so the default allows all.
+        type: string
+        required: false
+        default: "*"
       review_prompt:
         description: Extra, repo-specific review criteria appended to the base prompt.
         type: string
@@ -27,16 +42,11 @@ on:
 
 jobs:
   review:
-    # Opt-in: only `agent`-labelled PRs. On a `labeled` event additionally require
-    # the label just added to be `agent`. Human + Claude-agent PRs only (allow the
-    # brujoand-agent App explicitly while excluding other bots). Skip drafts.
+    # Opt-out: review every non-draft PR unless it carries an `auto-merge` label.
     if: >-
-      (github.event.action != 'labeled' || github.event.label.name == 'agent') &&
-      contains(github.event.pull_request.labels.*.name, 'agent') &&
-      (!endsWith(github.event.pull_request.user.login, '[bot]') ||
-       github.event.pull_request.user.login == 'brujoand-agent[bot]') &&
-      github.event.pull_request.draft == false
-    runs-on: homelab-runners
+      github.event.pull_request.draft == false &&
+      !contains(github.event.pull_request.labels.*.name, 'auto-merge')
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 20
     permissions:
       contents: read
@@ -71,10 +81,9 @@ jobs:
           # App installation token so the review comment is authored by the App
           # and can seed a later agent session; parity with the agent workflows.
           github_token: ${{ steps.app-token.outputs.token }}
-          # An agent PR is opened by the App, so the triggering actor is
-          # brujoand-agent[bot]; the action refuses non-human actors unless
-          # allow-listed. The job `if:` already restricts bot triggers to this App.
-          allowed_bots: "brujoand-agent[bot]"
+          # Opt-out reviews bot-authored PRs too (unless auto-merge-labelled); the
+          # action refuses non-human actors unless allow-listed, so default "*".
+          allowed_bots: ${{ inputs.allowed_bots }}
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
