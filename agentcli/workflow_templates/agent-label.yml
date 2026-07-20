@@ -1,10 +1,11 @@
-# Managed by `agent issue enable`. Thin caller of the shared reusable workflow
-# in brujoand/agent — put logic changes in the reusable workflow there, not here.
+# Managed by `agent issue enable`. Thin caller of the shared reusable workflow —
+# put logic changes in the reusable workflow, not here.
 #
-# Summoning the agent: an authorized human mentioning `@brujoand-agent` on a
+# Summoning the agent: an authorized human mentioning the agent (@<login>) on a
 # thread that does NOT yet carry the `agent` label adds that label (which is what
-# actually starts the agent). The mention + authorization guard lives in the
-# reusable workflow.
+# actually starts the agent). The mention + authorization guard, and adding the
+# label with the App token (so the `labeled` event re-triggers downstream
+# workflows), all live in the reusable workflow.
 name: Agent label on mention
 
 on:
@@ -21,5 +22,7 @@ concurrency:
 
 jobs:
   add-label:
-    uses: brujoand/agent/.github/workflows/agent-label.reusable.yml@{ref}
+    uses: "{reusable_repo}/.github/workflows/agent-label.reusable.yml@{ref}"
     secrets: inherit
+    with:
+      mention: "@{bot_login}"

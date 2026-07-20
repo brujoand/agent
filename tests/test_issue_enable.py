@@ -27,13 +27,20 @@ _EXPECTED_CALLERS = {
 }
 
 
-def test_caller_workflows_pin_ref_and_leave_no_placeholder():
-    files = issue_enable.caller_workflows("v1.2.3")
+def test_caller_workflows_render_all_placeholders():
+    files = issue_enable.caller_workflows("v1.2.3", "myorg/agent", "my-agent")
     assert set(files) == _EXPECTED_CALLERS
     for name, content in files.items():
+        # No template token survives rendering.
         assert "{ref}" not in content, name
-        assert "brujoand/agent/.github/workflows/" in content, name
+        assert "{reusable_repo}" not in content, name
+        assert "{bot_login}" not in content, name
+        # Pinned at the given reusable repo + ref.
+        assert "myorg/agent/.github/workflows/" in content, name
         assert "@v1.2.3" in content, name
+    # The App login is filled into the callers that pass it.
+    assert "bot_login: my-agent" in files["issue-agent.yml"]
+    assert 'mention: "@my-agent"' in files["agent-label.yml"]
 
 
 def test_ensure_installed_rejects_uninstalled(monkeypatch):
@@ -72,6 +79,7 @@ def test_run_refuses_when_not_installed(monkeypatch):
 
 def test_run_dry_run_writes_nothing(monkeypatch, capsys):
     monkeypatch.setattr(issue_enable, "installed_slugs", lambda: {"brujoand/waiting-games"})
+    monkeypatch.setattr(github, "app_slug", lambda: "my-agent")
     # Any write attempt in dry-run is a bug.
     monkeypatch.setattr(github, "api_post", lambda *a, **k: pytest.fail("dry-run must not POST"))
     monkeypatch.setattr(github, "api_put", lambda *a, **k: pytest.fail("dry-run must not PUT"))
@@ -82,16 +90,28 @@ def test_run_dry_run_writes_nothing(monkeypatch, capsys):
     assert code == 0
     assert "dry-run" in out
     assert "would create" in out  # labels planned, not created
-    # Every caller rendered into the plan, pinned at the ref.
+    # Every caller rendered into the plan, pinned at the ref, with the App login.
     assert "issue-agent.yml" in out and "pr-review.yml" in out
     assert "@main" in out
+    assert "bot_login: my-agent" in out
     # The human-only checklist is always shown.
     assert "HUMAN-ONLY steps" in out
     assert "agent setup rulesets --repo brujoand/waiting-games" in out
 
 
+def test_run_honours_reusable_repo_override(monkeypatch, capsys):
+    monkeypatch.setattr(issue_enable, "installed_slugs", lambda: {"brujoand/waiting-games"})
+    monkeypatch.setattr(github, "app_slug", lambda: "my-agent")
+
+    issue_enable.run("brujoand/waiting-games", reusable_repo="myorg/agent", apply=False)
+    out = capsys.readouterr().out
+    assert "myorg/agent/.github/workflows/" in out
+    assert "brujoand/agent/.github/workflows/" not in out
+
+
 def test_run_apply_creates_labels(monkeypatch, capsys):
     monkeypatch.setattr(issue_enable, "installed_slugs", lambda: {"brujoand/waiting-games"})
+    monkeypatch.setattr(github, "app_slug", lambda: "my-agent")
     posted: list[str] = []
 
     def fake_post(path, body):
@@ -111,12 +131,14 @@ def test_run_apply_creates_labels(monkeypatch, capsys):
 
 def test_run_apply_open_pr_uses_pr_flow(monkeypatch, capsys):
     monkeypatch.setattr(issue_enable, "installed_slugs", lambda: {"brujoand/waiting-games"})
+    monkeypatch.setattr(github, "app_slug", lambda: "my-agent")
     monkeypatch.setattr(github, "api_post", lambda path, body: _Resp(201))
     called = {}
 
-    def fake_open_pr(repo, files, branch="agent/enable-issue-agent"):
+    def fake_open_pr(repo, files, reusable_repo, branch="agent/enable-issue-agent"):
         called["repo"] = repo
         called["files"] = set(files)
+        called["reusable_repo"] = reusable_repo
         return "https://github.com/brujoand/waiting-games/pull/1"
 
     monkeypatch.setattr(issue_enable, "open_enable_pr", fake_open_pr)
@@ -127,4 +149,5 @@ def test_run_apply_open_pr_uses_pr_flow(monkeypatch, capsys):
     assert code == 0
     assert called["repo"] == "brujoand/waiting-games"
     assert called["files"] == _EXPECTED_CALLERS
+    assert called["reusable_repo"] == "brujoand/agent"
     assert "pull/1" in out

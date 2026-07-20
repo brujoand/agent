@@ -1,10 +1,10 @@
-# Managed by `agent issue enable`. Thin caller of the shared reusable workflow
-# in brujoand/agent — put logic changes in the reusable workflow there, not here.
+# Managed by `agent issue enable`. Thin caller of the shared reusable workflow —
+# put logic changes in the reusable workflow, not here.
 #
 # Trigger on `labeled` only, NOT `opened`: the `agent` label is the hand-off
-# signal, and GitHub fires a `labeled` event even when an issue is opened with
-# the label already applied, so `labeled` alone covers both paths exactly once.
-name: Claude issue agent
+# signal, and GitHub fires a `labeled` event even when an issue is opened with the
+# label already applied, so `labeled` alone covers both paths exactly once.
+name: Issue agent
 
 on:
   issues:
@@ -22,5 +22,7 @@ jobs:
     # Cheap gate here so no runner spins on non-agent labels; the heavier
     # authorization guards live in the reusable workflow.
     if: github.event.label.name == 'agent'
-    uses: brujoand/agent/.github/workflows/issue-agent.reusable.yml@{ref}
+    uses: "{reusable_repo}/.github/workflows/issue-agent.reusable.yml@{ref}"
     secrets: inherit
+    with:
+      bot_login: {bot_login}

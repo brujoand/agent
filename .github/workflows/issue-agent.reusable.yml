@@ -1,4 +1,4 @@
-name: Claude issue agent (reusable)
+name: Issue agent (reusable)
 
 # Reusable opener for the interactive issue agent. Consumer repos call this from a
 # thin `issues: labeled` caller (see `agent issue enable`). Everything here runs
@@ -6,18 +6,46 @@ name: Claude issue agent (reusable)
 # token all resolve to the calling repo, so one definition serves any repo.
 #
 # The runtime (issue_agent/agent.py) is baked into the runner image and derives
-# the repo's default branch + playbook itself, so nothing here is repo-specific.
+# the repo's default branch + playbook itself. Deployment-specific values (runner,
+# the App login, session store, metrics) come in as inputs, so nothing here is
+# wired to one setup.
 
 on:
   workflow_call:
     inputs:
-      model:
-        description: Claude model id passed to the agent (AGENT_MODEL).
+      runner:
+        description: runs-on label for the job (a self-hosted label, or ubuntu-latest).
         type: string
         required: false
-        # claude-model: manual bump per Claude release (no Renovate datasource
-        # tracks Anthropic model IDs). One source of truth for every consumer.
+        default: ubuntu-latest
+      bot_login:
+        description: >-
+          The agent App's bare login (e.g. my-agent). The runtime uses it as
+          AGENT_BOT_LOGIN to tell its own comments apart from a human's.
+        type: string
+        required: true
+      model:
+        description: Model id passed to the agent (AGENT_MODEL).
+        type: string
+        required: false
         default: claude-opus-4-8
+      session_store_endpoint:
+        description: >-
+          MinIO/S3 endpoint enabling transcript persistence + resume across the
+          job timeout. Empty = stateless (also needs AWS creds in the runner env).
+        type: string
+        required: false
+        default: ""
+      session_store_bucket:
+        description: Bucket for transcripts (required when session_store_endpoint is set).
+        type: string
+        required: false
+        default: ""
+      metrics_pushgateway:
+        description: Prometheus pushgateway URL for per-run metrics. Empty = disabled.
+        type: string
+        required: false
+        default: ""
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         description: Claude Code subscription token the Agent SDK consumes.
@@ -25,8 +53,7 @@ on:
 
 jobs:
   triage-and-fix:
-    # Matches runnerScaleSetName in the gitops-homelab ARC scale set.
-    runs-on: homelab-runners
+    runs-on: ${{ inputs.runner }}
     # Hold the live session up to ~49 min (MAX_RUNTIME_SECONDS); the job timeout
     # is a little higher so the wrapper persists + exits cleanly first.
     timeout-minutes: 55
@@ -35,10 +62,10 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      # Mint a short-lived (~1h) GitHub App installation token from the PEM
-      # mounted into the runner pod (brujoand-agent App). Must run BEFORE checkout
-      # — the checkout token is what it mints. The App key never leaves the mounted
-      # file. App-authored PRs still trigger downstream workflows.
+      # Mint a short-lived (~1h) GitHub App installation token from the PEM mounted
+      # into the runner (the agent App). Must run BEFORE checkout — the checkout
+      # token is what it mints. The App key never leaves the mounted file.
+      # App-authored PRs still trigger downstream workflows.
       - name: Mint GitHub App token
         id: app-token
         env:
@@ -68,15 +95,17 @@ jobs:
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
 
       - name: Run interactive issue agent
-        # AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY and MinIO creds are injected
-        # into every runner pod via the scale-set HelmRelease (envFrom).
+        # Session-store AWS creds (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY) come
+        # from the runner environment when persistence is enabled.
         env:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          MINIO_ENDPOINT_URL: http://minio.data.svc.cluster.local:80
-          MINIO_BUCKET: issue-agent-sessions
+          AGENT_BOT_LOGIN: ${{ inputs.bot_login }}
           AGENT_MODEL: ${{ inputs.model }}
+          MINIO_ENDPOINT_URL: ${{ inputs.session_store_endpoint }}
+          MINIO_BUCKET: ${{ inputs.session_store_bucket }}
+          PUSHGATEWAY_URL: ${{ inputs.metrics_pushgateway }}
           MAX_RUNTIME_SECONDS: "2940"
         run: |
           PYTHONPATH=/opt/issue-agent \
