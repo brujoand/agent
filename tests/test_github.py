@@ -143,3 +143,23 @@ def test_api_put_sends_json_body(monkeypatch, httpx_mock):
     resp = github.api_put("/repos/brujoand/x/contents/f", {"message": "m"})
     assert resp.status_code == 200
     assert json.loads(httpx_mock.get_requests()[0].content) == {"message": "m"}
+
+
+def test_app_slug_reads_app_endpoint(monkeypatch, httpx_mock, creds):
+    # Signs an App JWT (not the installation token) and returns the App's slug.
+    monkeypatch.setattr(github, "load_app_creds", lambda: creds)
+    httpx_mock.add_response(
+        method="GET",
+        url="https://api.github.com/app",
+        status_code=200,
+        json={"slug": "my-agent"},
+    )
+    assert github.app_slug() == "my-agent"
+    assert httpx_mock.get_requests()[0].headers["Authorization"].startswith("Bearer ")
+
+
+def test_app_slug_raises_on_error(monkeypatch, httpx_mock, creds):
+    monkeypatch.setattr(github, "load_app_creds", lambda: creds)
+    httpx_mock.add_response(method="GET", url="https://api.github.com/app", status_code=403)
+    with pytest.raises(AgentAuthError):
+        github.app_slug()

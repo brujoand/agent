@@ -197,3 +197,26 @@ def api_post(path: str, json_body: dict | None = None) -> httpx.Response:
 
 def api_put(path: str, json_body: dict | None = None) -> httpx.Response:
     return httpx.put(f"{GITHUB_API}{path}", headers=_api_headers(), json=json_body, timeout=20.0)
+
+
+def app_slug() -> str:
+    """The agent App's own slug (e.g. ``my-agent``) — the bare login its comments
+    carry. Signs an App JWT and reads ``GET /app`` (an App-level endpoint, so a
+    JWT, not the installation token). Lets `agent issue enable` auto-fill the
+    runtime's AGENT_BOT_LOGIN and the summon @mention, so a consumer never has to
+    hand-configure them."""
+    jwt = _sign_jwt(load_app_creds())
+    response = httpx.get(
+        f"{GITHUB_API}/app",
+        headers={
+            "Authorization": f"Bearer {jwt}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        },
+        timeout=20.0,
+    )
+    if response.status_code != 200:
+        raise AgentAuthError(
+            f"could not read /app to detect the App slug (HTTP {response.status_code})"
+        )
+    return response.json()["slug"]

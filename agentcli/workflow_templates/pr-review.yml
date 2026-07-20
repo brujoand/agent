@@ -1,5 +1,5 @@
-# Managed by `agent issue enable`. Thin caller of the shared reusable workflow
-# in brujoand/agent — put logic changes in the reusable workflow there, not here.
+# Managed by `agent issue enable`. Thin caller of the shared reusable workflow —
+# put logic changes in the reusable workflow, not here.
 #
 # One-shot verification review (opt-OUT): the agent reviews every non-draft PR
 # and posts ONE review comment, UNLESS the PR carries an `auto-merge` label. Never
@@ -19,5 +19,5 @@ concurrency:
 
 jobs:
   review:
-    uses: brujoand/agent/.github/workflows/pr-review.reusable.yml@{ref}
+    uses: "{reusable_repo}/.github/workflows/pr-review.reusable.yml@{ref}"
     secrets: inherit

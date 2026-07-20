@@ -1,4 +1,4 @@
-name: Claude issue agent resume (reusable)
+name: Issue agent resume (reusable)
 
 # Reusable resume path. Called from an `issue_comment: created` caller. The
 # `agent` label is the standing opt-in: any authorized human comment resumes the
@@ -8,10 +8,33 @@ name: Claude issue agent resume (reusable)
 on:
   workflow_call:
     inputs:
+      runner:
+        description: runs-on label for the job (a self-hosted label, or ubuntu-latest).
+        type: string
+        required: false
+        default: ubuntu-latest
+      bot_login:
+        description: The agent App's bare login; the runtime uses it as AGENT_BOT_LOGIN.
+        type: string
+        required: true
       model:
         type: string
         required: false
         default: claude-opus-4-8
+      session_store_endpoint:
+        description: MinIO/S3 endpoint for persistence + resume. Empty = stateless.
+        type: string
+        required: false
+        default: ""
+      session_store_bucket:
+        type: string
+        required: false
+        default: ""
+      metrics_pushgateway:
+        description: Prometheus pushgateway URL. Empty = disabled.
+        type: string
+        required: false
+        default: ""
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: true
@@ -19,17 +42,16 @@ on:
 jobs:
   resume:
     # Wake only on an `agent`-labelled issue (not a PR), on a human comment from
-    # someone authorized. The agent's own comments arrive as brujoand-agent[bot]
-    # (type Bot, author_association NONE) and so fail both checks — no self-retrigger.
+    # someone authorized. The agent's own comments arrive from the App as a Bot
+    # (author_association NONE) and so fail both checks — no self-retrigger.
     if: >-
       !github.event.issue.pull_request &&
       contains(github.event.issue.labels.*.name, 'agent') &&
       github.event.comment.user.type != 'Bot' &&
       (github.event.comment.author_association == 'OWNER' ||
        github.event.comment.author_association == 'MEMBER' ||
-       github.event.comment.author_association == 'COLLABORATOR' ||
-       github.event.comment.user.login == 'brujoand')
-    runs-on: homelab-runners
+       github.event.comment.author_association == 'COLLABORATOR')
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 55
     permissions:
       contents: write
@@ -63,9 +85,11 @@ jobs:
           ISSUE_NUMBER: ${{ github.event.issue.number }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          MINIO_ENDPOINT_URL: http://minio.data.svc.cluster.local:80
-          MINIO_BUCKET: issue-agent-sessions
+          AGENT_BOT_LOGIN: ${{ inputs.bot_login }}
           AGENT_MODEL: ${{ inputs.model }}
+          MINIO_ENDPOINT_URL: ${{ inputs.session_store_endpoint }}
+          MINIO_BUCKET: ${{ inputs.session_store_bucket }}
+          PUSHGATEWAY_URL: ${{ inputs.metrics_pushgateway }}
           MAX_RUNTIME_SECONDS: "2940"
         run: |
           PYTHONPATH=/opt/issue-agent \

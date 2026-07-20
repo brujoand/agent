@@ -77,7 +77,12 @@ def github_token(refresh: bool = typer.Option(False, "--refresh", "-f")) -> None
 def issue_enable_command(
     repo: str = typer.Argument(..., help="owner/repo to enable the agent on"),
     ref: str = typer.Option(
-        "main", "--ref", help="git ref of brujoand/agent to pin the reusable workflows at"
+        "main", "--ref", help="git ref of the reusable-workflow repo to pin the callers at"
+    ),
+    reusable_repo: str = typer.Option(
+        None,
+        "--reusable-repo",
+        help="owner/repo hosting the reusable workflows (default: $AGENT_REUSABLE_REPO or brujoand/agent)",
     ),
     apply: bool = typer.Option(False, "--apply", help="Create labels. Without it, only plan."),
     open_pr: bool = typer.Option(
@@ -87,10 +92,14 @@ def issue_enable_command(
     """Create the agent labels and lay down the caller workflows on a repo.
 
     Prints a human-only checklist for the steps the App cannot do (Actions
-    secret, reusable-workflow access, runner group, branch protection).
+    secret, reusable-workflow access, runners, branch protection).
     """
     try:
-        raise typer.Exit(issue_enable.run(repo, ref=ref, apply=apply, open_pr=open_pr))
+        raise typer.Exit(
+            issue_enable.run(
+                repo, ref=ref, reusable_repo=reusable_repo, apply=apply, open_pr=open_pr
+            )
+        )
     except AgentError as err:
         print(f"ERROR: {err}")
         raise typer.Exit(1) from err

@@ -1,15 +1,15 @@
-"""Enable the interactive issue agent on a repo the brujoand-agent App can reach.
+"""Enable the interactive issue agent on a repo the agent App can reach.
 
 Unlike `agent setup rulesets` (human-only — it rewrites the very lock that stops
 the agent merging its own PRs), enabling is the agent's *own* job: create the
 labels the runtime depends on, and lay down thin caller workflows that invoke the
-shared reusable workflows in brujoand/agent. So this runs WITH agent credentials.
+shared reusable workflows in the agent repo. So this runs WITH agent credentials.
 
-Two classes of step it CANNOT do — GitHub gates them behind permissions the
-brujoand-agent App deliberately lacks — so it prints them as a human checklist
-instead: Actions secrets / org settings (CLAUDE_CODE_OAUTH_TOKEN, granting the
-private agent repo's reusable workflows access to the consumer, the runner group)
-and branch protection (`agent setup rulesets`).
+Two classes of step it CANNOT do — GitHub gates them behind permissions the App
+deliberately lacks — so it prints them as a human checklist instead: Actions
+secrets / access (CLAUDE_CODE_OAUTH_TOKEN, and — only if the reusable-workflow
+repo is private — granting it Actions access to the consumer) and branch
+protection (`agent setup rulesets`).
 
 Dry-run by default (render + plan, no writes); `--apply` creates the labels and
 either prints the caller workflows for the human to commit or, with `--open-pr`,
@@ -19,13 +19,15 @@ opens a PR adding them.
 from __future__ import annotations
 
 import base64
+import os
 from pathlib import Path
 
 from agentcli import github, repos
 from agentcli.errors import AgentHTTPError, AgentInputError
 
-# The repo that hosts the reusable workflows the callers invoke.
-REUSABLE_REPO = "brujoand/agent"
+# The repo hosting the reusable workflows the callers invoke. Overridable so a
+# fork points its callers at its own copy; defaults to the upstream.
+DEFAULT_REUSABLE_REPO = os.environ.get("AGENT_REUSABLE_REPO", "brujoand/agent")
 
 _TEMPLATE_DIR = Path(__file__).parent / "workflow_templates"
 
@@ -37,7 +39,7 @@ LABELS = [
     {
         "name": "agent",
         "color": "5319e7",
-        "description": "Hand off to the Claude issue agent (the standing opt-in).",
+        "description": "Hand off to the issue agent (the standing opt-in).",
     },
     {
         "name": "agent-waiting",
@@ -48,7 +50,7 @@ LABELS = [
 
 
 def installed_slugs() -> set[str]:
-    """owner/repo for every repo the brujoand-agent App is installed on."""
+    """owner/repo for every repo the agent App is installed on."""
     return {repos.slug(url) for url in repos.clone_urls()}
 
 
@@ -57,7 +59,7 @@ def ensure_installed(repo: str) -> None:
     (labels, a PR, the minted checkout token) works without it."""
     if repo not in installed_slugs():
         raise AgentInputError(
-            f"the brujoand-agent App is not installed on {repo!r}; "
+            f"the agent App is not installed on {repo!r}; "
             "install it there first (a human step), then re-run."
         )
 
@@ -76,17 +78,24 @@ def create_label(repo: str, label: dict) -> str:
     )
 
 
-def caller_workflows(ref: str) -> dict[str, str]:
-    """Every caller-workflow file, rendered with the reusable ref pinned.
+def caller_workflows(ref: str, reusable_repo: str, bot_login: str) -> dict[str, str]:
+    """Every caller-workflow file, rendered with the reusable repo/ref pinned and
+    the App login filled in.
 
-    Templates carry a literal ``{ref}`` token (not str.format — the YAML is full
-    of ``${{ ... }}`` expressions that format() would choke on), so a plain
-    replace is both correct and safe.
+    Templates carry literal ``{ref}`` / ``{reusable_repo}`` / ``{bot_login}``
+    tokens (not str.format — the YAML is full of ``${{ ... }}`` expressions that
+    format() would choke on), so plain replaces are correct and safe.
     """
-    return {
-        tmpl.name: tmpl.read_text().replace("{ref}", ref)
-        for tmpl in sorted(_TEMPLATE_DIR.glob("*.yml"))
-    }
+    out: dict[str, str] = {}
+    for tmpl in sorted(_TEMPLATE_DIR.glob("*.yml")):
+        rendered = (
+            tmpl.read_text()
+            .replace("{reusable_repo}", reusable_repo)
+            .replace("{ref}", ref)
+            .replace("{bot_login}", bot_login)
+        )
+        out[tmpl.name] = rendered
+    return out
 
 
 def _default_branch(repo: str) -> str:
@@ -110,7 +119,10 @@ def _branch_sha(repo: str, branch: str) -> str:
 
 
 def open_enable_pr(
-    repo: str, files: dict[str, str], branch: str = "agent/enable-issue-agent"
+    repo: str,
+    files: dict[str, str],
+    reusable_repo: str,
+    branch: str = "agent/enable-issue-agent",
 ) -> str:
     """Create ``branch`` off the default branch, add the caller workflows to it,
     and open a PR. Returns the PR URL."""
@@ -151,15 +163,15 @@ def open_enable_pr(
     pr = github.api_post(
         f"/repos/{repo}/pulls",
         {
-            "title": "ci: enable the Claude issue agent",
+            "title": "ci: enable the issue agent",
             "head": branch,
             "base": base,
             "body": (
                 "Adds the thin caller workflows that invoke the shared reusable "
-                f"workflows in `{REUSABLE_REPO}`. Generated by `agent issue enable`.\n\n"
+                f"workflows in `{reusable_repo}`. Generated by `agent issue enable`.\n\n"
                 "Before this works end-to-end, complete the human-only steps the "
-                "command printed (reusable-workflow access, `CLAUDE_CODE_OAUTH_TOKEN`, "
-                "runner group, branch protection)."
+                "command printed (Actions access if the reusable repo is private, "
+                "`CLAUDE_CODE_OAUTH_TOKEN`, runners, branch protection)."
             ),
         },
     )
@@ -172,14 +184,16 @@ def open_enable_pr(
     return pr.json()["html_url"]
 
 
-def _print_checklist(repo: str) -> None:
-    print("HUMAN-ONLY steps (the brujoand-agent App cannot do these):")
+def _print_checklist(repo: str, reusable_repo: str) -> None:
+    print("HUMAN-ONLY steps (the App cannot do these):")
     steps = [
-        f"Grant {REUSABLE_REPO}'s reusable workflows access to {repo} "
-        "(Settings -> Actions -> General -> Access, or org-wide). Without this, "
-        "callers fail with 'workflow was not found'.",
         f"Provide CLAUDE_CODE_OAUTH_TOKEN to {repo} as an org or repo Actions secret.",
-        f"Add {repo} to the org runner group so `homelab-runners` serves it.",
+        f"If {reusable_repo} is PRIVATE, grant its reusable workflows Actions "
+        f"access to {repo} (Settings -> Actions -> General -> Access). Public "
+        "reusable repos need no grant.",
+        f"Ensure runners are available for {repo}: the callers default to "
+        "`ubuntu-latest`; for self-hosted runners, make them reachable and set the "
+        "`runner` input in the callers.",
         f"Apply branch protection: `agent setup rulesets --repo {repo}` "
         "(human-only; the App lacks `administration`).",
     ]
@@ -187,14 +201,24 @@ def _print_checklist(repo: str) -> None:
         print(f"  {i}. {line}")
 
 
-def run(repo: str, ref: str = "main", apply: bool = False, open_pr: bool = False) -> int:
+def run(
+    repo: str,
+    ref: str = "main",
+    reusable_repo: str | None = None,
+    apply: bool = False,
+    open_pr: bool = False,
+) -> int:
     """Enable (or dry-run) the issue agent on ``repo``. Prints a plan + checklist."""
     ensure_installed(repo)
-    files = caller_workflows(ref)
+    reusable_repo = reusable_repo or DEFAULT_REUSABLE_REPO
+    # The App's own login, auto-filled into the callers so the runtime can tell its
+    # own comments apart from a human's without the consumer configuring anything.
+    bot_login = github.app_slug()
+    files = caller_workflows(ref, reusable_repo, bot_login)
 
     mode = "applying" if apply else "dry-run (pass --apply to write)"
     print(f"enable issue agent on {repo}: {mode}")
-    print(f"reusable workflows pinned at {REUSABLE_REPO}@{ref}\n")
+    print(f"reusable workflows pinned at {reusable_repo}@{ref} (App login: {bot_login})\n")
 
     print("labels:")
     for label in LABELS:
@@ -203,7 +227,7 @@ def run(repo: str, ref: str = "main", apply: bool = False, open_pr: bool = False
     print()
 
     if apply and open_pr:
-        url = open_enable_pr(repo, files)
+        url = open_enable_pr(repo, files, reusable_repo)
         print(f"opened PR adding {len(files)} caller workflow(s): {url}\n")
     else:
         verb = "add" if apply else "would add"
@@ -213,5 +237,5 @@ def run(repo: str, ref: str = "main", apply: bool = False, open_pr: bool = False
             print(content)
         print()
 
-    _print_checklist(repo)
+    _print_checklist(repo, reusable_repo)
     return 0

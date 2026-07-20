@@ -1,4 +1,4 @@
-name: Claude PR agent (reusable)
+name: PR agent (reusable)
 
 # Reusable PR-scoped session. Called from an `issue_comment` /
 # `pull_request_review_comment` caller. Runs the same wrapper as the issue agent
@@ -8,10 +8,33 @@ name: Claude PR agent (reusable)
 on:
   workflow_call:
     inputs:
+      runner:
+        description: runs-on label for the job (a self-hosted label, or ubuntu-latest).
+        type: string
+        required: false
+        default: ubuntu-latest
+      bot_login:
+        description: The agent App's bare login; the runtime uses it as AGENT_BOT_LOGIN.
+        type: string
+        required: true
       model:
         type: string
         required: false
         default: claude-opus-4-8
+      session_store_endpoint:
+        description: MinIO/S3 endpoint for persistence + resume. Empty = stateless.
+        type: string
+        required: false
+        default: ""
+      session_store_bucket:
+        type: string
+        required: false
+        default: ""
+      metrics_pushgateway:
+        description: Prometheus pushgateway URL. Empty = disabled.
+        type: string
+        required: false
+        default: ""
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN:
         required: true
@@ -27,11 +50,10 @@ jobs:
       github.event.comment.user.type != 'Bot' &&
       (github.event.comment.author_association == 'OWNER' ||
        github.event.comment.author_association == 'MEMBER' ||
-       github.event.comment.author_association == 'COLLABORATOR' ||
-       github.event.comment.user.login == 'brujoand') &&
+       github.event.comment.author_association == 'COLLABORATOR') &&
       (contains(github.event.issue.labels.*.name, 'agent') ||
        contains(github.event.pull_request.labels.*.name, 'agent'))
-    runs-on: homelab-runners
+    runs-on: ${{ inputs.runner }}
     timeout-minutes: 55
     permissions:
       contents: write
@@ -73,9 +95,11 @@ jobs:
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          MINIO_ENDPOINT_URL: http://minio.data.svc.cluster.local:80
-          MINIO_BUCKET: issue-agent-sessions
+          AGENT_BOT_LOGIN: ${{ inputs.bot_login }}
           AGENT_MODEL: ${{ inputs.model }}
+          MINIO_ENDPOINT_URL: ${{ inputs.session_store_endpoint }}
+          MINIO_BUCKET: ${{ inputs.session_store_bucket }}
+          PUSHGATEWAY_URL: ${{ inputs.metrics_pushgateway }}
           MAX_RUNTIME_SECONDS: "2940"
         run: |
           PYTHONPATH=/opt/issue-agent \
