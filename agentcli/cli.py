@@ -66,9 +66,19 @@ def doctor_command() -> None:
 
 
 @github_app.command("token")
-def github_token(refresh: bool = typer.Option(False, "--refresh", "-f")) -> None:
-    """Print a short-lived installation token. Only the token reaches stdout."""
-    print(github.token(force=refresh))
+def github_token(
+    refresh: bool = typer.Option(False, "--refresh", "-f"),
+    repo: str = typer.Option(
+        None, "--repo", help="scope the token to just this owner/repo (never cached)"
+    ),
+) -> None:
+    """Print a short-lived installation token. Only the token reaches stdout.
+
+    With --repo, the token is narrowed to that single repo (used by the hub so a
+    run cannot reach any other installed repo).
+    """
+    repositories = [repo.rsplit("/", 1)[-1]] if repo else None
+    print(github.token(force=refresh, repositories=repositories))
 
 
 # Dry-run by default (like `setup rulesets`): --apply is the one that writes. The

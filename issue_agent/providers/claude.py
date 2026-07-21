@@ -59,19 +59,28 @@ _CLUSTER_READ_TOOLS = [
     "Bash(curl:*)",
 ]
 
-# SessionConfig.kind -> allowed tools. "issue" keeps today's full set unchanged;
-# "pr" drops live-cluster reads.
+# SessionConfig.kind -> base allowed tools. Cluster-read tools are NOT in here;
+# they are added separately and only when explicitly enabled (see below).
 TOOL_POLICY = {
-    "issue": _COMMON_TOOLS + _CLUSTER_READ_TOOLS,
+    "issue": _COMMON_TOOLS,
     "pr": _COMMON_TOOLS,
 }
 
 
 def allowed_tools_for(kind: str) -> list[str]:
-    """Tool allowlist for a session role. An unknown kind falls back to the
-    broadest ("issue") policy: the wrapper only ever passes "issue"/"pr", and a
-    future mode should fail open to today's behaviour, not silently lose tools."""
-    return TOOL_POLICY.get(kind, TOOL_POLICY["issue"])
+    """Tool allowlist for a session role.
+
+    Cluster-read tools (kubectl + curl to in-cluster APIs) are OPT-IN via
+    ``AGENT_CLUSTER_TOOLS=1`` and only for the issue role. So the DEFAULT — and
+    therefore every central-hub run on a non-cluster repo, which never sets the
+    flag — gets NO cluster reach even in the allowlist. That is defense in depth
+    on top of the hub runner having no cluster token at all; only the cluster
+    repo's own privileged workflow opts in. An unknown kind falls back to the
+    issue base set (never silently loses the git/gh plumbing)."""
+    tools = list(TOOL_POLICY.get(kind, TOOL_POLICY["issue"]))
+    if kind == "issue" and os.environ.get("AGENT_CLUSTER_TOOLS") == "1":
+        tools += _CLUSTER_READ_TOOLS
+    return tools
 
 
 def _env_required(name: str) -> str:

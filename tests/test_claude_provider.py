@@ -147,6 +147,7 @@ def test_run_turn_propagates_is_error(monkeypatch):
 
 
 def test_open_session_fresh_sets_session_id(monkeypatch):
+    monkeypatch.delenv("AGENT_CLUSTER_TOOLS", raising=False)
     session = open_faked_session(monkeypatch, CFG, [])
     opts = session._client.options
     assert opts.session_id == "sid-1"
@@ -156,9 +157,22 @@ def test_open_session_fresh_sets_session_id(monkeypatch):
     assert opts.max_turns == MAX_TURNS
     assert opts.permission_mode == "acceptEdits"
     assert opts.setting_sources == ["project"]
-    # CFG has the default kind ("issue") -> the full policy, incl. cluster reads.
+    # Secure by default: an issue session gets NO cluster reads unless opted in.
     assert opts.allowed_tools == TOOL_POLICY["issue"]
-    assert "Bash(kubectl:*)" in opts.allowed_tools
+    assert "Bash(kubectl:*)" not in opts.allowed_tools
+    assert "Bash(curl:*)" not in opts.allowed_tools
+
+
+def test_issue_gets_cluster_tools_only_when_opted_in(monkeypatch):
+    # The cluster repo's own privileged workflow sets AGENT_CLUSTER_TOOLS=1; the
+    # hub (which never sets it) stays locked down.
+    monkeypatch.setenv("AGENT_CLUSTER_TOOLS", "1")
+    assert "Bash(kubectl:*)" in allowed_tools_for("issue")
+    assert "Bash(curl:*)" in allowed_tools_for("issue")
+    # Even opted in, the PR role never gets cluster reads.
+    assert "Bash(kubectl:*)" not in allowed_tools_for("pr")
+    monkeypatch.delenv("AGENT_CLUSTER_TOOLS", raising=False)
+    assert "Bash(kubectl:*)" not in allowed_tools_for("issue")
 
 
 def test_open_session_pr_kind_drops_cluster_read_tools(monkeypatch):

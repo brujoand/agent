@@ -92,8 +92,13 @@ def _sleep_backoff(attempt: int) -> None:
     time.sleep(backoff + random.random())  # noqa: S311 - jitter, not crypto
 
 
-def mint(creds: AppCreds | None = None) -> tuple[str, int]:
-    """Exchange a signed JWT for an installation token. Returns (token, expires_at)."""
+def mint(creds: AppCreds | None = None, repositories: list[str] | None = None) -> tuple[str, int]:
+    """Exchange a signed JWT for an installation token. Returns (token, expires_at).
+
+    ``repositories`` (repo *names*, not owner/repo slugs) narrows the token to just
+    those repos in the installation instead of all of them — used by the hub so a
+    run on one repo cannot touch the others (least privilege / blast-radius limit).
+    """
     creds = creds or load_app_creds()
     jwt = _sign_jwt(creds)
     url = f"{GITHUB_API}/app/installations/{creds.installation_id}/access_tokens"
@@ -102,11 +107,12 @@ def mint(creds: AppCreds | None = None) -> tuple[str, int]:
         "Accept": "application/vnd.github+json",
         "X-GitHub-Api-Version": "2022-11-28",
     }
+    body = {"repositories": repositories} if repositories else None
 
     last = "unknown error"
     for attempt in range(1, _MAX_ATTEMPTS + 1):
         try:
-            response = httpx.post(url, headers=headers, timeout=20.0)
+            response = httpx.post(url, headers=headers, json=body, timeout=20.0)
         except httpx.HTTPError as exc:  # transport: timeout, DNS, connection reset
             last = f"transport error: {exc}"
             if attempt < _MAX_ATTEMPTS:
@@ -158,8 +164,17 @@ def _write_cache(token: str, expires_at: int) -> None:
     tmp.replace(_cache_file())
 
 
-def token(force: bool = False) -> str:
-    """A valid installation token, cached until shortly before it expires."""
+def token(force: bool = False, repositories: list[str] | None = None) -> str:
+    """A valid installation token, cached until shortly before it expires.
+
+    A repo-scoped token (``repositories`` given) is always minted fresh and never
+    cached — the cache holds the broad installation-wide token, and mixing a
+    narrowly-scoped one into it would hand later callers the wrong scope.
+    """
+    if repositories:
+        fresh, _ = mint(repositories=repositories)
+        return fresh
+
     if not force:
         cached = _read_cache()
         if cached:
