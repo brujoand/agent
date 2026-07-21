@@ -117,6 +117,18 @@ def test_force_refresh_bypasses_valid_cache(monkeypatch):
     assert github.token(force=True) == "ghs_forced"
 
 
+def test_repo_scoped_token_sends_repositories_and_skips_cache(monkeypatch, httpx_mock, creds):
+    # A valid installation-wide token is cached...
+    github._write_cache("ghs_broad", int(time.time()) + 3600)
+    monkeypatch.setattr(github, "load_app_creds", lambda: creds)
+    httpx_mock.add_response(url=_TOKEN_URL, status_code=201, json={"token": "ghs_scoped"})
+
+    # ...but a repo-scoped request mints fresh (never the broad cached one) and
+    # narrows the token to just that repo.
+    assert github.token(repositories=["tracktor"]) == "ghs_scoped"
+    assert json.loads(httpx_mock.get_requests()[0].content) == {"repositories": ["tracktor"]}
+
+
 def test_api_post_sends_json_body_with_bearer(monkeypatch, httpx_mock):
     monkeypatch.setattr(github, "token", lambda: "ghs_api")
     httpx_mock.add_response(
