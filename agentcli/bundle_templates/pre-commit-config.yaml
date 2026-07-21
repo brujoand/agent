@@ -1,0 +1,26 @@
+# Managed by `agent issue enable` — the standard baseline the agent adds when it
+# is enabled on a repo. Extend with language-specific hooks (ruff, shellcheck, …).
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-added-large-files
+      - id: check-yaml
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.28.0
+    hooks:
+      - id: gitleaks
+  - repo: local
+    hooks:
+      - id: no-internal-infra
+        name: block internal-infra references (public-repo hygiene)
+        description: >-
+          Refuse commits that leak internal infrastructure — cluster-internal DNS
+          and RFC1918 private IPs, plus any patterns set via AGENT_DENYLIST_EXTRA
+          when this file was generated. Tune with `exclude:` for legitimate hits.
+        language: pygrep
+        types: [text]
+        entry: '{denylist}'

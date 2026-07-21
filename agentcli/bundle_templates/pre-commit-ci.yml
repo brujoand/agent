@@ -1,0 +1,20 @@
+# Managed by `agent issue enable`. Runs the repo's pre-commit hooks in CI so the
+# baseline (incl. the internal-infra denylist) gates every PR, not just local
+# commits. Pin the action refs to SHAs if your org requires it.
+name: pre-commit
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+      - uses: pre-commit/action@v3.0.1

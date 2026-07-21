@@ -19,17 +19,21 @@ class _Resp:
 
 
 _EXPECTED_CALLERS = {
-    "issue-agent.yml",
-    "issue-resume.yml",
-    "pr-agent.yml",
-    "agent-label.yml",
-    "pr-review.yml",
+    ".github/workflows/issue-agent.yml",
+    ".github/workflows/issue-resume.yml",
+    ".github/workflows/pr-agent.yml",
+    ".github/workflows/agent-label.yml",
+    ".github/workflows/pr-review.yml",
+}
+_EXPECTED_BUNDLE = {
+    ".pre-commit-config.yaml",
+    ".github/workflows/pre-commit.yml",
 }
 
 
 def test_caller_workflows_render_all_placeholders():
     files = issue_enable.caller_workflows("v1.2.3", "myorg/agent", "my-agent")
-    assert set(files) == _EXPECTED_CALLERS
+    assert set(files) == _EXPECTED_CALLERS  # keyed by repo path
     for name, content in files.items():
         # No template token survives rendering.
         assert "{ref}" not in content, name
@@ -39,8 +43,28 @@ def test_caller_workflows_render_all_placeholders():
         assert "myorg/agent/.github/workflows/" in content, name
         assert "@v1.2.3" in content, name
     # The App login is filled into the callers that pass it.
-    assert "bot_login: my-agent" in files["issue-agent.yml"]
-    assert 'mention: "@my-agent"' in files["agent-label.yml"]
+    assert "bot_login: my-agent" in files[".github/workflows/issue-agent.yml"]
+    assert 'mention: "@my-agent"' in files[".github/workflows/agent-label.yml"]
+
+
+def test_bundle_files_carry_baseline_and_denylist():
+    files = issue_enable.bundle_files()
+    assert set(files) == _EXPECTED_BUNDLE
+    cfg = files[".pre-commit-config.yaml"]
+    assert "gitleaks" in cfg
+    assert "no-internal-infra" in cfg
+    assert "{denylist}" not in cfg  # rendered
+    # Generic infra patterns are present (as escaped regex); no private domain
+    # is hardcoded into this public repo.
+    assert r"svc\.cluster\.local" in cfg
+    assert "brujordet" not in cfg
+
+
+def test_denylist_appends_extra_from_env(monkeypatch):
+    monkeypatch.setenv("AGENT_DENYLIST_EXTRA", r"example\.internal")
+    assert r"example\.internal" in issue_enable._denylist_regex()
+    monkeypatch.delenv("AGENT_DENYLIST_EXTRA", raising=False)
+    assert "example" not in issue_enable._denylist_regex()
 
 
 def test_ensure_installed_rejects_uninstalled(monkeypatch):
@@ -94,6 +118,9 @@ def test_run_dry_run_writes_nothing(monkeypatch, capsys):
     assert "issue-agent.yml" in out and "pr-review.yml" in out
     assert "@main" in out
     assert "bot_login: my-agent" in out
+    # The standard bundle (pre-commit + the internal-infra denylist) is included.
+    assert ".pre-commit-config.yaml" in out
+    assert "no-internal-infra" in out
     # The human-only checklist is always shown.
     assert "HUMAN-ONLY steps" in out
     assert "agent setup rulesets --repo brujoand/waiting-games" in out
@@ -135,10 +162,11 @@ def test_run_apply_open_pr_uses_pr_flow(monkeypatch, capsys):
     monkeypatch.setattr(github, "api_post", lambda path, body: _Resp(201))
     called = {}
 
-    def fake_open_pr(repo, files, reusable_repo, branch="agent/enable-issue-agent"):
+    def fake_open_pr(repo, files, reusable_repo, no_clobber=frozenset(), branch="x"):
         called["repo"] = repo
         called["files"] = set(files)
         called["reusable_repo"] = reusable_repo
+        called["no_clobber"] = set(no_clobber)
         return "https://github.com/brujoand/waiting-games/pull/1"
 
     monkeypatch.setattr(issue_enable, "open_enable_pr", fake_open_pr)
@@ -148,6 +176,8 @@ def test_run_apply_open_pr_uses_pr_flow(monkeypatch, capsys):
 
     assert code == 0
     assert called["repo"] == "brujoand/waiting-games"
-    assert called["files"] == _EXPECTED_CALLERS
+    # Callers + the standard bundle are all offered; the bundle is no-clobber.
+    assert called["files"] == _EXPECTED_CALLERS | _EXPECTED_BUNDLE
+    assert called["no_clobber"] == _EXPECTED_BUNDLE
     assert called["reusable_repo"] == "brujoand/agent"
     assert "pull/1" in out
