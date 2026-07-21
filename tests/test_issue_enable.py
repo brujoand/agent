@@ -18,11 +18,9 @@ class _Resp:
         return self._payload
 
 
+# Issues are handled by the central hub, so `enable` lays down only the per-repo
+# PR-review caller (+ labels + the pre-commit bundle).
 _EXPECTED_CALLERS = {
-    ".github/workflows/issue-agent.yml",
-    ".github/workflows/issue-resume.yml",
-    ".github/workflows/pr-agent.yml",
-    ".github/workflows/agent-label.yml",
     ".github/workflows/pr-review.yml",
 }
 _EXPECTED_BUNDLE = {
@@ -31,20 +29,15 @@ _EXPECTED_BUNDLE = {
 }
 
 
-def test_caller_workflows_render_all_placeholders():
+def test_caller_workflows_render_pr_review_only():
     files = issue_enable.caller_workflows("v1.2.3", "myorg/agent", "my-agent")
-    assert set(files) == _EXPECTED_CALLERS  # keyed by repo path
-    for name, content in files.items():
-        # No template token survives rendering.
-        assert "{ref}" not in content, name
-        assert "{reusable_repo}" not in content, name
-        assert "{bot_login}" not in content, name
-        # Pinned at the given reusable repo + ref.
-        assert "myorg/agent/.github/workflows/" in content, name
-        assert "@v1.2.3" in content, name
-    # The App login is filled into the callers that pass it.
-    assert "bot_login: my-agent" in files[".github/workflows/issue-agent.yml"]
-    assert 'mention: "@my-agent"' in files[".github/workflows/agent-label.yml"]
+    assert set(files) == _EXPECTED_CALLERS  # keyed by repo path; PR review only
+    content = files[".github/workflows/pr-review.yml"]
+    # No template token survives rendering.
+    assert "{ref}" not in content
+    assert "{reusable_repo}" not in content
+    # Pinned at the given reusable repo + ref.
+    assert "myorg/agent/.github/workflows/pr-review.reusable.yml@v1.2.3" in content
 
 
 def test_bundle_files_carry_baseline_and_denylist():
@@ -114,10 +107,10 @@ def test_run_dry_run_writes_nothing(monkeypatch, capsys):
     assert code == 0
     assert "dry-run" in out
     assert "would create" in out  # labels planned, not created
-    # Every caller rendered into the plan, pinned at the ref, with the App login.
-    assert "issue-agent.yml" in out and "pr-review.yml" in out
+    # Only the per-repo PR-review caller is rendered (issues are central).
+    assert "pr-review.yml" in out
+    assert "issue-agent.yml" not in out
     assert "@main" in out
-    assert "bot_login: my-agent" in out
     # The standard bundle (pre-commit + the internal-infra denylist) is included.
     assert ".pre-commit-config.yaml" in out
     assert "no-internal-infra" in out

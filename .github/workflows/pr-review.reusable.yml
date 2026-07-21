@@ -10,6 +10,13 @@ name: PR review (reusable)
 # `review_prompt`, or drops repo conventions in CLAUDE.md / .claude/ (which the
 # reviewer reads). Repo-specific review flavours (e.g. a rendered-manifest diff)
 # stay in that repo's own workflow rather than here.
+#
+# HOSTED: this runs on a stock runner (default ubuntu-latest) with no custom
+# image and no GitHub App — claude-code-action bootstraps Claude Code itself, and
+# the review comment is posted with the job's own GITHUB_TOKEN. So a repo needs
+# only the CLAUDE_CODE_OAUTH_TOKEN secret; there is no cluster/App dependency.
+# (This is the per-repo half of the split: PR review stays per-repo, while ISSUES
+# are handled by the central hub in the maintainer's infra.)
 
 on:
   workflow_call:
@@ -51,36 +58,20 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-      id-token: write
     steps:
-      - name: Mint GitHub App token
-        id: app-token
-        env:
-          PEM_PATH: /run/agent/private-key.pem
-        run: |
-          token="$(APP_ID="${AGENT_APP_ID}" APP_INSTALLATION_ID="${AGENT_APP_INSTALLATION_ID}" agent github token)"
-          if [[ -z "$token" ]]; then
-            echo "::error::App-token mint returned no token" >&2
-            exit 1
-          fi
-          echo "::add-mask::$token"
-          printf 'token=%s\n' "$token" >> "$GITHUB_OUTPUT"
-
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0
 
-      - name: Install mise
-        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4
-
       - name: Run PR review
         uses: anthropics/claude-code-action@a92e7c70a4da9793dc164451d829089dc057a464 # v1.0.159
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          # App installation token so the review comment is authored by the App
-          # and can seed a later agent session; parity with the agent workflows.
-          github_token: ${{ steps.app-token.outputs.token }}
+          # The job's own GITHUB_TOKEN posts the review comment — no App needed on
+          # a hosted runner. The comment is github-actions[bot]-authored, which is
+          # fine for a one-shot review.
+          github_token: ${{ github.token }}
           # Opt-out reviews bot-authored PRs too (unless auto-merge-labelled); the
           # action refuses non-human actors unless allow-listed, so default "*".
           allowed_bots: ${{ inputs.allowed_bots }}
