@@ -1,11 +1,19 @@
 # agent
 
-A reusable GitHub **issue agent**: label an issue and a live Claude session
+My personal GitHub **issue agent**: label an issue and a live Claude session
 triages it, asks any clarifying questions right on the thread, and opens a ready
-pull request — then reviews PRs on the way back in. Enable it on any repo your
-GitHub App can reach with one command.
+pull request — then reviews PRs on the way back in.
 
-It ships as three parts:
+> **This repo is public out of necessity, not as a product for you to use.** Some
+> of my public repos call its reusable workflows, so it has to be reachable —
+> hence public. It is built to fit *my* setup and needs exactly, and I'll change
+> or break it whenever that suits me, without notice. Read it or fork it as a
+> reference if it's useful, but don't depend on it — **make your own**. Something
+> like this earns its keep precisely by catering to *you* the way this caters to
+> me. The rest of this README is how it works (and, implicitly, how you'd wire up
+> your own), not an invitation to adopt this one.
+
+It is built from three parts:
 
 - **`issue_agent/`** — the runtime: a small wrapper around the
   [Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python) that
