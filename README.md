@@ -74,6 +74,22 @@ repo is private — granting it Actions access).
 Point callers at your own fork of this repo with `--reusable-repo owner/agent`
 (or `$AGENT_REUSABLE_REPO`).
 
+## Rotating the shared `CLAUDE_CODE_OAUTH_TOKEN`
+
+`claude setup-token` tokens expire, and once one does *every* agent run fails to
+authenticate (the SDK returns `401 Invalid bearer token`). GitHub never lets you
+read an Actions secret back, so there is no "copy it from one repo to the rest" —
+you mint a fresh value and push it everywhere the App is installed:
+
+```bash
+claude setup-token | scripts/sync-agent-secret.sh CLAUDE_CODE_OAUTH_TOKEN
+scripts/sync-agent-secret.sh CLAUDE_CODE_OAUTH_TOKEN --dry-run   # preview targets
+```
+
+Target repos come from `agent repos` (the App's own installation list). Writing
+uses `$GH_TOKEN` if set (an App token with `secrets: write`), else your `gh
+auth` session. See the script header for the full contract.
+
 ## Hygiene: the internal-infra denylist
 
 The bundle `enable` adds includes a `no-internal-infra` pre-commit hook (plus
