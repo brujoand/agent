@@ -12,10 +12,14 @@
 # value on stdin also keeps it out of this tracked file and out of the process
 # argument list.
 #
-# The value's SOURCE is yours to choose -- pipe it in from wherever it lives:
-#   claude setup-token | scripts/sync-agent-secret.sh CLAUDE_CODE_OAUTH_TOKEN
+# The value's SOURCE is yours to choose. On a terminal the script prompts for a
+# hidden paste; you can also pipe/redirect it in for automation:
+#   scripts/sync-agent-secret.sh CLAUDE_CODE_OAUTH_TOKEN      # prompts, paste hidden
 #   pass show anthropic/oauth | scripts/sync-agent-secret.sh CLAUDE_CODE_OAUTH_TOKEN
 #   scripts/sync-agent-secret.sh CLAUDE_CODE_OAUTH_TOKEN < token.txt
+#
+# Do NOT pipe `claude setup-token` in: it is interactive (prints a browser URL),
+# and piping swallows its prompts. Run it on its own, then paste the token here.
 #
 # Target repos come from `agent repos` (the installation's own repo list), so
 # the set is whatever the App can currently reach -- nothing is hardcoded.
@@ -116,17 +120,20 @@ if [[ $dry_run == true ]]; then
   exit 0
 fi
 
-# Read the value now, from stdin only. Refuse an interactive terminal: without a
-# pipe there is nothing to read and we would hang waiting on the maintainer.
+# Read the value now. On a terminal, prompt for a hidden paste -- do NOT tell the
+# maintainer to `claude setup-token | ...`, because that command is interactive
+# (it prints a browser URL) and piping it swallows its prompts into this script's
+# stdin, hanging forever. Run `claude setup-token` on its own, then paste here.
+# When stdin is a pipe/file (automation, `< token.txt`), read it straight.
 if [[ -t 0 ]]; then
-  echo "error: no value on stdin. Pipe the secret in, e.g." >&2
-  echo "  claude setup-token | $0 $name" >&2
-  exit 2
+  printf 'Paste value for %s (input hidden, then Enter): ' "$name" >&2
+  read -rs value
+  printf '\n' >&2
+else
+  value="$(cat)"
 fi
-
-value="$(cat)"
 if [[ -z $value ]]; then
-  echo "error: empty value on stdin" >&2
+  echo "error: empty value" >&2
   exit 2
 fi
 

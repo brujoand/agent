@@ -82,9 +82,14 @@ read an Actions secret back, so there is no "copy it from one repo to the rest" 
 you mint a fresh value and push it everywhere the App is installed:
 
 ```bash
-claude setup-token | scripts/sync-agent-secret.sh CLAUDE_CODE_OAUTH_TOKEN
+claude setup-token                                    # complete the flow, copy the token
+scripts/sync-agent-secret.sh CLAUDE_CODE_OAUTH_TOKEN  # prompts for a hidden paste
 scripts/sync-agent-secret.sh CLAUDE_CODE_OAUTH_TOKEN --dry-run   # preview targets
 ```
+
+Run `claude setup-token` on its own — it is interactive (opens a browser), so
+piping it into the script swallows its prompts and hangs. For automation,
+redirect a value in instead: `scripts/sync-agent-secret.sh NAME < token.txt`.
 
 Target repos come from `agent repos` (the App's own installation list). Writing
 uses `$GH_TOKEN` if set (an App token with `secrets: write`), else your `gh
