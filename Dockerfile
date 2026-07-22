@@ -25,6 +25,22 @@ RUN apt-get update \
       npm \
  && rm -rf /var/lib/apt/lists/*
 
+# GitHub CLI (`gh`) — the issue-agent runtime shells out to it for every read and
+# write (view/comment on issues + PRs, open a PR). It used to come from the
+# consuming repo's mise.toml at job time, but the central hub runs against repos
+# that don't provide it (and its scan runs with no repo checked out at all), so
+# bake it into the image where the runtime can always find it.
+RUN mkdir -p -m 755 /etc/apt/keyrings \
+ && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+ && chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+ && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+      > /etc/apt/sources.list.d/github-cli.list \
+ && apt-get update \
+ && apt-get install -y --no-install-recommends gh \
+ && rm -rf /var/lib/apt/lists/* \
+ && gh --version
+
 # mise: activated at job time to install the repo's pinned toolchain.
 RUN curl -fsSL https://mise.run | MISE_INSTALL_PATH=/usr/local/bin/mise sh \
  && /usr/local/bin/mise --version
