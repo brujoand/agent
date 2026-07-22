@@ -20,10 +20,15 @@
 # Target repos come from `agent repos` (the installation's own repo list), so
 # the set is whatever the App can currently reach -- nothing is hardcoded.
 #
-# Writing needs credentials that can set repo secrets. `gh` uses, in order:
-#   * $GH_TOKEN if exported -- e.g. an App token with `secrets: write`:
-#       GH_TOKEN="$(agent github token)" scripts/sync-repo-secret.sh NAME
-#   * otherwise your own `gh auth login` session (needs admin on each repo).
+# Writing secrets is a MAINTAINER action -- the App has NO secrets access at all
+# (the REST secrets API 403s for its token), so the write cannot use App creds.
+# `gh` picks the write credential in order:
+#   * $GH_TOKEN if exported -- YOUR token that can write repo secrets (a classic
+#     PAT with `repo`, or a fine-grained PAT with Secrets: read/write);
+#   * otherwise your `gh auth login` session (needs admin on each target repo).
+# Note the two credentials are different: even with $GH_TOKEN set to your PAT,
+# `agent repos` still enumerates targets via the App key. So you can run this on
+# an agent host -- App lists the repos, your PAT does the writing.
 #
 # Usage:
 #   scripts/sync-repo-secret.sh <SECRET_NAME> [--dry-run] [--exclude owner/repo]...

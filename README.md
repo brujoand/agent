@@ -90,8 +90,12 @@ scripts/sync-repo-secret.sh MY_SECRET --dry-run     # preview targets, read noth
 ```
 
 Target repos come from `agent repos` (the App's own installation list). Writing
-uses `$GH_TOKEN` if set (an App token with `secrets: write`), else your `gh
-auth` session.
+the secret, though, is a **maintainer** action — the App has no secrets access
+at all (the secrets API 403s for it) — so it uses **your** credentials:
+`$GH_TOKEN` set to a token that can write repo secrets (a PAT), or your `gh auth
+login` session. The two roles are separate, so this still runs on an agent host:
+`agent repos` lists targets via the App key while `gh` writes with your
+`$GH_TOKEN`. There is no way to do the write with agent credentials.
 
 ### Rotating the shared `CLAUDE_CODE_OAUTH_TOKEN`
 
