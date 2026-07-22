@@ -40,7 +40,11 @@ guess whether the agent is still standing by.
 
 Environment:
   ISSUE_NUMBER         (required) the issue to work
-  GITHUB_REPOSITORY    (required) owner/repo (provided by Actions)
+  AGENT_TARGET_REPO    (optional) owner/repo to operate on; overrides
+                       GITHUB_REPOSITORY. Set by the central hub, which runs one
+                       workflow against many repos (Actions resets the reserved
+                       GITHUB_REPOSITORY per step, so it can't be overridden).
+  GITHUB_REPOSITORY    (required unless AGENT_TARGET_REPO set) owner/repo
   GITHUB_TOKEN         (required) for gh CLI (provided by Actions)
   AGENT_PROVIDER       (optional) default claude; selects the providers/ adapter
   AGENT_MODEL          (optional) default claude-opus-4-8; passed through to the
@@ -123,6 +127,10 @@ DONE_RE = re.compile(r"<<<DONE>>>(.*?)<<<END_DONE>>>", re.DOTALL)
 # agent treating its own comments as replies — set it. The default is the
 # reference deployment's App.
 AGENT_BOT_LOGIN = os.environ.get("AGENT_BOT_LOGIN", "brujoand-agent")
+
+# Abort after this many consecutive errored turns rather than nudge-and-retry
+# until the runtime budget is spent (a misconfig otherwise quietly burns ~49 min).
+_MAX_CONSECUTIVE_ERRORS = 4
 
 # The @mention handle used to summon the agent onto an unlabelled thread, derived
 # from the App login (e.g. `@brujoand-agent`). Named in status notes so a human
@@ -618,7 +626,14 @@ times out. Begin now: read the PR and the comment thread with
 
 
 async def run() -> int:
-    repo = env("GITHUB_REPOSITORY", required=True)
+    # The repo the agent OPERATES on. Prefer AGENT_TARGET_REPO: the central hub
+    # runs one workflow (in its own repo) against many other repos, and Actions
+    # RESETS the reserved GITHUB_REPOSITORY to the workflow's own repo on every
+    # step — so a step-level override of it is silently ignored. AGENT_TARGET_REPO
+    # is a normal env var Actions leaves alone. Falls back to GITHUB_REPOSITORY for
+    # the ordinary same-repo workflows. (GITHUB_REPOSITORY still names the workflow
+    # repo, which is what runner_context() wants for the run-log link.)
+    repo = env("AGENT_TARGET_REPO") or env("GITHUB_REPOSITORY", required=True)
     # TARGET_KIND selects the mode: "issue" (default) = the issue triage/fix
     # agent; "pr" = the PR-scoped interactive agent (agent-labelled PR).
     kind = env("TARGET_KIND", "issue")
@@ -695,6 +710,7 @@ async def run() -> int:
             first_prompt = SEED_PROMPT.format(issue=issue, repo=repo, base=base, playbook=playbook)
 
         prompt: str | None = first_prompt
+        consecutive_errors = 0
         while True:
             if time.monotonic() - started > max_runtime:
                 # Out of budget: the transcript is already mirrored to MinIO by
@@ -727,6 +743,7 @@ async def run() -> int:
                         repo,
                         "--add-label",
                         "agent-waiting",
+                        check=False,
                     )
                 print("runtime budget reached; paused", file=sys.stderr)
                 usage.write_job_summary(status="paused")
@@ -741,6 +758,27 @@ async def run() -> int:
                     file=sys.stderr,
                 )
                 usage.record(turn.usage)
+
+            # Fail fast on a broken loop. If the provider keeps returning errored
+            # turns — a wrong/absent token, an unreachable backend, a misconfigured
+            # target — don't nudge-and-retry until the whole runtime budget is
+            # burned (that is exactly how a misconfig quietly eats ~49 min).
+            if turn.is_error:
+                consecutive_errors += 1
+                if consecutive_errors >= _MAX_CONSECUTIVE_ERRORS:
+                    note = (
+                        ":warning: **The agent hit repeated errors and stopped** "
+                        f"after {consecutive_errors} failed turns — see the run log."
+                    )
+                    post_comment(view_cmd, issue, repo, with_runner_context(note, "Failed in"))
+                    print(
+                        f"aborting: {consecutive_errors} consecutive errored turns",
+                        file=sys.stderr,
+                    )
+                    usage.write_job_summary(status="failed")
+                    return 1
+            else:
+                consecutive_errors = 0
 
             if DONE_MARKER in text:
                 # The reader-facing summary the model enclosed in the paired DONE
