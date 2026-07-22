@@ -54,7 +54,8 @@ Prerequisites (all one-time, and human — the App can't grant itself these):
    that has the runner image's tools — the `agent` CLI (to mint the token before
    checkout), the Claude Code CLI, and the `issue_agent` runtime. Build it from
    the `Dockerfile`, or use a published `agent-runner` image.
-3. A **`CLAUDE_CODE_OAUTH_TOKEN`** repo/org Actions secret (`claude setup-token`).
+3. A **`CLAUDE_CODE_OAUTH_TOKEN`** Actions secret (`claude setup-token`) — export
+   it and `onboard.sh` sets it per repo (see below).
 
 Then, from a checkout with the App credentials available:
 
@@ -74,48 +75,27 @@ repo is private — granting it Actions access).
 Point callers at your own fork of this repo with `--reusable-repo owner/agent`
 (or `$AGENT_REUSABLE_REPO`).
 
-## Syncing a secret to every repo
+## The `CLAUDE_CODE_OAUTH_TOKEN` secret (`onboard.sh`)
 
-`scripts/sync-repo-secret.sh <NAME>` is a **maintainer setup script** — you run
-it, on your own machine, with nothing but `gh auth login`. It does **not** use
-the agent App key or the `agent` CLI: secret writes are inherently a human
-action (the App has no secrets access at all — the secrets API 403s for it), so
-both the repo listing and the write go through your `gh` credentials.
-
-GitHub never lets you read a secret back, so there is no "copy it from one repo
-to the rest" — you supply the value once and it fans out. The value is never an
-argument (that leaks into shell history and the process list): on a terminal the
-script prompts for a hidden paste, otherwise it reads stdin.
+The agent authenticates to Anthropic with a `CLAUDE_CODE_OAUTH_TOKEN` Actions
+secret on each repo. `onboard.sh` sets it as part of onboarding, from your
+environment — so there is nothing separate to run:
 
 ```bash
-scripts/sync-repo-secret.sh MY_SECRET --app my-app         # prompts for a hidden paste
-pass show some/secret | scripts/sync-repo-secret.sh MY_SECRET --app my-app
-scripts/sync-repo-secret.sh MY_SECRET --app my-app --dry-run   # preview targets
+claude setup-token                                # interactive; copy the token it prints
+read -rs CLAUDE_CODE_OAUTH_TOKEN                   # paste it (hidden, no shell history)
+export CLAUDE_CODE_OAUTH_TOKEN
+./onboard.sh owner/repo                            # installs the App, ruleset, and sets the secret
 ```
 
-Targets are **exactly the repos where the App is installed** — not every repo
-you own. Name the App with `--app <slug>` (or `$AGENT_APP_SLUG`); GitHub resolves
-its installed repos from your gh token via the user-installations API, so no App
-key is needed. Preview with `--dry-run`, trim with `--exclude`. Writes use your
-`gh auth login` session, or `$GH_TOKEN` if set (a PAT that can write repo
-secrets).
+`gh secret set` is an upsert, so this adds the secret if absent and overwrites it
+if present — which makes **rotation just a re-onboard** with a fresh token
+exported. Leave `CLAUDE_CODE_OAUTH_TOKEN` unset and onboarding skips that step
+rather than clobbering a good secret with a blank.
 
-### Rotating the shared `CLAUDE_CODE_OAUTH_TOKEN`
-
-`claude setup-token` tokens expire, and once one does *every* agent run fails to
-authenticate (the SDK returns `401 Invalid bearer token`). The
-`sync-agent-secret.sh` wrapper is `sync-repo-secret.sh` with the name fixed to
-`CLAUDE_CODE_OAUTH_TOKEN` and the app slug defaulted to the agent bot login
-(override with `$AGENT_APP_SLUG`). Mint a fresh token on its own (it opens a
-browser), then paste it at the prompt:
-
-```bash
-claude setup-token                     # complete the flow, copy the token
-scripts/sync-agent-secret.sh           # paste at the hidden prompt
-```
-
-Do not pipe `claude setup-token` into the script — it is interactive, and piping
-swallows its prompts and hangs.
+There is deliberately no cross-repo fan-out: a human token cannot enumerate where
+the App is installed (GitHub only allows that with the App's own credentials —
+see the note in `onboard.sh`), and onboarding already names the repo.
 
 ## Hygiene: the internal-infra denylist
 

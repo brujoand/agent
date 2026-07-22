@@ -9,18 +9,22 @@
 # not sit inside the boundary -- it runs before the agent exists on a repo, and
 # it must keep working even if the agent install is broken.
 #
-# Onboarding does three things: install the App, apply the branch-protection
-# ruleset, and (public repos only) require manual approval for external fork PRs
-# so a fork cannot reach CI -- and any agent secret wired into it -- unattended.
+# Onboarding does four things: install the App, apply the branch-protection
+# ruleset, (public repos only) require manual approval for external fork PRs so a
+# fork cannot reach CI -- and any agent secret wired into it -- unattended, and
+# set the agent's CLAUDE_CODE_OAUTH_TOKEN Actions secret from your environment.
 #
 # What the human's PAT can and cannot do (all verified against the live API):
 #   * install the App on a repo:  PUT  /user/installations/{id}/repositories/{repo_id}
 #   * remove it:                  DELETE  (same path)
 #   * write the ruleset:          POST/PUT /repos/{slug}/rulesets
 #   * set fork-PR approval:       PUT  /repos/{slug}/actions/permissions/fork-pr-contributor-approval
+#   * set an Actions secret:      gh secret set (repo public key + libsodium seal)
 # The PAT CANNOT list installations or read /repos/{}/installation (those need a
 # token authorized to the App itself), so the installation id cannot be
-# discovered at runtime -- hence the constant below.
+# discovered at runtime -- hence the constant below. This is also why the secret
+# is set per-repo at onboard time, not fanned out: nothing can enumerate "where
+# the App is installed" from a human token, but onboarding already names the repo.
 #
 # The ruleset exempts RepositoryRole 5 (admin) via bypass_actors, so the human
 # admin can still push directly. This does NOT weaken the constraint on the
@@ -57,17 +61,24 @@ readonly RULESET_NAME="protect-main-pr-only"
 # it conditionally on visibility.
 readonly FORK_APPROVAL_POLICY="all_external_contributors"
 
+# The Actions secret the agent's workflows read to authenticate to Anthropic.
+# Mint its value with `claude setup-token` and export it before onboarding.
+readonly AGENT_SECRET_NAME="CLAUDE_CODE_OAUTH_TOKEN"
+
 function usage {
   cat >&2 <<EOF
 usage: onboard.sh [--remove] <owner/repo>
 
   (default)   install the brujoand-agent App on the repo, apply the
-              ${RULESET_NAME} branch-protection ruleset, and (public
-              repos) require approval for external fork PRs.
+              ${RULESET_NAME} branch-protection ruleset, (public
+              repos) require approval for external fork PRs, and set the
+              ${AGENT_SECRET_NAME} secret from your environment.
   --remove    remove the ruleset and detach the repo from the App. The fork-PR
-              approval policy is left in place (a security control, not undone).
+              approval policy and the secret are left in place (not undone).
 
-Requires a human admin PAT (gh auth). Idempotent: safe to re-run.
+Requires a human admin PAT (gh auth). Export ${AGENT_SECRET_NAME}
+(from \`claude setup-token\`) to have onboarding set it; unset, that step is
+skipped. Idempotent: safe to re-run -- re-running rotates the secret.
 EOF
   exit 2
 }
@@ -148,6 +159,23 @@ function fork_policy_harden {
   report "fork-pr" "approval: ${FORK_APPROVAL_POLICY}"
 }
 
+# secret_set upserts the AGENT_SECRET_NAME Actions secret from the environment.
+# `gh secret set` adds it if absent and overwrites it if present, so this is
+# idempotent -- and re-running onboard is how you rotate the token. The value is
+# fed on stdin, never as --body, so it stays out of the gh process's argv. If the
+# env var is unset/empty it is SKIPPED, not cleared: re-onboarding for the ruleset
+# alone must never clobber a good secret with a blank.
+function secret_set {
+  local slug="$1"
+  if [[ -z ${CLAUDE_CODE_OAUTH_TOKEN:-} ]]; then
+    report "secret" "skipped (\$${AGENT_SECRET_NAME} not in env)"
+    return 0
+  fi
+  printf '%s' "$CLAUDE_CODE_OAUTH_TOKEN" |
+    gh secret set "$AGENT_SECRET_NAME" --repo "$slug" >/dev/null
+  report "secret" "set  ${AGENT_SECRET_NAME}"
+}
+
 function main {
   local remove=0 slug=""
   while [[ $# -gt 0 ]]; do
@@ -188,6 +216,7 @@ function main {
     app_install "$rid"
     ruleset_apply "$slug"
     fork_policy_harden "$slug"
+    secret_set "$slug"
   fi
 }
 
