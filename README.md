@@ -148,7 +148,19 @@ agent workspace create <t>/<s>  # a worktree off fresh origin/<default>
 agent workspace delete|list|gc  # manage session worktrees
 agent lab install               # install `lab` from the sibling gitops repo
 agent lab <args...>             # run `lab` with GH_TOKEN/KUBECONFIG set
+agent skills install            # symlink the shared Claude skills into ~/.claude/skills
+agent skills list               # show each shared skill and whether it is linked
 ```
+
+### Shared Claude skills
+
+`skills/` holds the workspace's shared Claude Code skills — one source of truth,
+tracked and PR-reviewed here. `agent skills install` symlinks each into the
+user's `~/.claude/skills/`, so **one install per user** covers every repo and
+every worktree (they all read the same dir). The links point at this checkout,
+so `agent pull` fast-forwarding the agent repo updates a skill in place — no
+reinstall, no drift. `agent doctor` reports whether they are linked. Install is
+idempotent and never clobbers a skill a user placed there by hand.
 
 `agent` clones sibling repos and installs `lab`, so the dependency points one way
 — **`agent` → `lab`, never back** (`agent` is what puts `lab` on disk). github.com

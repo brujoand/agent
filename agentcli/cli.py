@@ -12,6 +12,7 @@ from agentcli import (
     pull,
     repos,
     rulesets,
+    skills,
     workspace,
 )
 from agentcli.config import DEFAULT_REPO
@@ -28,6 +29,9 @@ workspace_app = typer.Typer(name="workspace", help="Session worktrees", no_args_
 issue_app = typer.Typer(
     name="issue", help="Enable the interactive issue agent on a repo.", no_args_is_help=True
 )
+skills_app = typer.Typer(
+    name="skills", help="Install the workspace's shared Claude skills.", no_args_is_help=True
+)
 setup_app = typer.Typer(
     name="setup",
     help="Human-only privileged setup. Refuses to run with agent credentials.",
@@ -37,6 +41,7 @@ setup_app = typer.Typer(
 app.add_typer(github_app)
 app.add_typer(workspace_app)
 app.add_typer(issue_app)
+app.add_typer(skills_app)
 app.add_typer(setup_app)
 
 
@@ -208,3 +213,31 @@ def workspace_gc(repo: str = typer.Option(None, "--repo")) -> None:
     """Remove idle worktrees untouched for >24h. Never forces; skips dirty ones."""
     removed = workspace.gc(repo)
     print(f"gc: removed {removed} worktree(s)")
+
+
+@skills_app.command("install")
+def skills_install() -> None:
+    """Symlink the shared skills into ~/.claude/skills/. Idempotent; safe to re-run.
+
+    The links point at the agent checkout, so `agent pull` keeps them current with
+    no reinstall. Start a new Claude session to pick up newly linked skills.
+    """
+    try:
+        results = skills.install()
+    except AgentError as err:
+        print(f"ERROR: {err}")
+        raise typer.Exit(1) from err
+    for name, outcome in results:
+        print(f"  {name:<28} {outcome}")
+    print(f"\nskills: {len(results)} shared skill(s) -> {skills.dest_dir()}")
+
+
+@skills_app.command("list")
+def skills_list() -> None:
+    """List the shared skills and whether each is linked for this user."""
+    available = skills.available()
+    if not available:
+        print(f"no shared skills at {skills.source_dir()} -- run `agent pull` first")
+        return
+    for skill in available:
+        print(f"  {skill.name:<28} {skills.status(skill.name)}")
