@@ -106,7 +106,7 @@ Start with the answer. End when the answer is done.
 
 ## Working rules
 
-These come from `gitops-homelab/PRINCIPLES.md` — the standard this workspace holds Claude to.
+These are the workspace's core working principles; the full statement lives in this repo's `PRINCIPLES.md`.
 
 ### A. Plan every non-trivial task
 
