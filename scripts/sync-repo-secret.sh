@@ -24,13 +24,13 @@
 #   pass show anthropic/oauth | scripts/sync-repo-secret.sh MY_SECRET
 #   scripts/sync-repo-secret.sh MY_SECRET < value.txt
 #
-# Targets are the repos you own (via `gh repo list`). That is a superset of
-# where the agent is enabled, but setting a secret on a repo that does not use
-# it is harmless -- review with --dry-run, trim with --exclude, or point at
-# another account with $SECRET_SYNC_OWNER.
+# Targets are EXACTLY the repos where the App is installed -- not every repo you
+# own. You name the App with --app <slug> (or $AGENT_APP_SLUG); GitHub resolves
+# its installed repos from your gh token via the user-installations API. Review
+# with --dry-run, trim with --exclude.
 #
 # Usage:
-#   scripts/sync-repo-secret.sh <SECRET_NAME> [--dry-run] [--exclude owner/repo]...
+#   scripts/sync-repo-secret.sh <SECRET_NAME> --app <slug> [--dry-run] [--exclude owner/repo]...
 set -euo pipefail
 
 usage() {
@@ -40,12 +40,21 @@ usage() {
 name=""
 dry_run=false
 excludes=()
+app_slug="${AGENT_APP_SLUG:-}"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dry-run)
       dry_run=true
       shift
+      ;;
+    --app)
+      [[ $# -ge 2 ]] || {
+        echo "error: --app needs an app-slug argument" >&2
+        exit 2
+      }
+      app_slug="$2"
+      shift 2
       ;;
     --exclude)
       [[ $# -ge 2 ]] || {
@@ -89,25 +98,40 @@ is_excluded() {
   return 1
 }
 
-# Enumerate candidate repos as owner/name, one per line, from your gh account.
-# $SECRET_SYNC_OWNER overrides the owner (defaults to your gh login).
+# Enumerate the repos where the App (--app <slug> / $AGENT_APP_SLUG) is
+# installed, as owner/name, one per line -- NOT every repo you own. GitHub
+# answers this for your OWN gh token via the user-installations API, so no App
+# key is needed: /user/installations gives the installation id for the app, and
+# /user/installations/{id}/repositories gives exactly its repos.
 list_repos() {
-  local owner="${SECRET_SYNC_OWNER:-}"
-  [[ -z $owner ]] && owner="$(gh api user --jq .login 2>/dev/null || true)"
-  # A valid login only; reject empty or error-body garbage from an unauthed gh.
-  if [[ ! $owner =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]]; then
-    echo "error: gh is not logged in as a user." >&2
-    echo "  run 'gh auth login', or set SECRET_SYNC_OWNER=<owner> to list a" >&2
-    echo "  specific account's repos." >&2
+  if [[ -z $app_slug ]]; then
+    echo "error: no app slug. Pass --app <slug> or set AGENT_APP_SLUG so this" >&2
+    echo "  scopes to the repos where that App is installed (not all your repos)." >&2
     return 1
   fi
-  gh repo list "$owner" --source --no-archived --limit 200 \
-    --json nameWithOwner -q '.[].nameWithOwner'
+  local id
+  id="$(gh api --paginate /user/installations \
+    --jq ".installations[] | select(.app_slug==\"$app_slug\") | .id" 2>/dev/null | head -n1)"
+  if [[ -z $id ]]; then
+    echo "error: no installation of app '$app_slug' visible to your gh account." >&2
+    echo "  is gh logged in ('gh auth login'), and is that the right --app slug?" >&2
+    echo "  apps you can see:" >&2
+    gh api --paginate /user/installations --jq '.installations[].app_slug' 2>/dev/null |
+      sed 's/^/    /' >&2
+    return 1
+  fi
+  gh api --paginate "/user/installations/$id/repositories" \
+    --jq '.repositories[].full_name'
 }
 
 # Collect the target repos first so a dry run can print the plan without ever
-# touching stdin (no point demanding a secret you are not going to write).
-mapfile -t repos < <(list_repos)
+# touching stdin (no point demanding a secret you are not going to write). Abort
+# on a list_repos failure (bad/missing --app, gh not logged in) -- its own error
+# already explains why, so don't fall through to a second "no target repos".
+if ! repos_raw="$(list_repos)"; then
+  exit 1
+fi
+mapfile -t repos <<<"$repos_raw"
 
 targets=()
 for repo in ${repos[@]+"${repos[@]}"}; do
@@ -120,10 +144,11 @@ for repo in ${repos[@]+"${repos[@]}"}; do
 done
 
 if [[ ${#targets[@]} -eq 0 ]]; then
-  echo "error: no target repos (does $([[ -n ${SECRET_SYNC_OWNER:-} ]] && echo "$SECRET_SYNC_OWNER" || echo "your account") own any non-archived, non-fork repos?)" >&2
+  echo "error: no target repos -- app '$app_slug' has no installed repos (after excludes)." >&2
   exit 1
 fi
 
+echo "app:     $app_slug"
 echo "secret:  $name"
 echo "targets: ${#targets[@]} repo(s)"
 for repo in "${targets[@]}"; do
