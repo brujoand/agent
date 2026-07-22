@@ -88,24 +88,26 @@ argument (that leaks into shell history and the process list): on a terminal the
 script prompts for a hidden paste, otherwise it reads stdin.
 
 ```bash
-scripts/sync-repo-secret.sh MY_SECRET               # prompts for a hidden paste
-pass show some/secret | scripts/sync-repo-secret.sh MY_SECRET
-scripts/sync-repo-secret.sh MY_SECRET --dry-run     # preview targets, read nothing
+scripts/sync-repo-secret.sh MY_SECRET --app my-app         # prompts for a hidden paste
+pass show some/secret | scripts/sync-repo-secret.sh MY_SECRET --app my-app
+scripts/sync-repo-secret.sh MY_SECRET --app my-app --dry-run   # preview targets
 ```
 
-Targets are the repos you own (`gh repo list`). That is a superset of where the
-agent is enabled, but setting a secret on a repo that does not use it is
-harmless — preview with `--dry-run`, trim with `--exclude`, or point at another
-account with `$SECRET_SYNC_OWNER`. Writes use your `gh auth login` session, or
-`$GH_TOKEN` if set (a PAT that can write repo secrets).
+Targets are **exactly the repos where the App is installed** — not every repo
+you own. Name the App with `--app <slug>` (or `$AGENT_APP_SLUG`); GitHub resolves
+its installed repos from your gh token via the user-installations API, so no App
+key is needed. Preview with `--dry-run`, trim with `--exclude`. Writes use your
+`gh auth login` session, or `$GH_TOKEN` if set (a PAT that can write repo
+secrets).
 
 ### Rotating the shared `CLAUDE_CODE_OAUTH_TOKEN`
 
 `claude setup-token` tokens expire, and once one does *every* agent run fails to
 authenticate (the SDK returns `401 Invalid bearer token`). The
 `sync-agent-secret.sh` wrapper is `sync-repo-secret.sh` with the name fixed to
-`CLAUDE_CODE_OAUTH_TOKEN`. Mint a fresh token on its own (it opens a browser),
-then paste it at the prompt:
+`CLAUDE_CODE_OAUTH_TOKEN` and the app slug defaulted to the agent bot login
+(override with `$AGENT_APP_SLUG`). Mint a fresh token on its own (it opens a
+browser), then paste it at the prompt:
 
 ```bash
 claude setup-token                     # complete the flow, copy the token
