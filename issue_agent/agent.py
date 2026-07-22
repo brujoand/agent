@@ -754,7 +754,8 @@ async def run() -> int:
             if turn.usage is not None:
                 print(
                     f"turn done session={turn.session_id} "
-                    f"turns={turn.usage.num_turns} err={turn.is_error}",
+                    f"turns={turn.usage.num_turns} err={turn.is_error}"
+                    + (f" detail={turn.error_detail}" if turn.is_error else ""),
                     file=sys.stderr,
                 )
                 usage.record(turn.usage)
@@ -765,14 +766,18 @@ async def run() -> int:
             # burned (that is exactly how a misconfig quietly eats ~49 min).
             if turn.is_error:
                 consecutive_errors += 1
+                last_error = turn.error_detail
                 if consecutive_errors >= _MAX_CONSECUTIVE_ERRORS:
+                    reason = f"\n\n> `{last_error}`" if last_error else ""
                     note = (
                         ":warning: **The agent hit repeated errors and stopped** "
-                        f"after {consecutive_errors} failed turns — see the run log."
+                        f"after {consecutive_errors} failed turns — see the run "
+                        f"log.{reason}"
                     )
                     post_comment(view_cmd, issue, repo, with_runner_context(note, "Failed in"))
                     print(
-                        f"aborting: {consecutive_errors} consecutive errored turns",
+                        f"aborting: {consecutive_errors} consecutive errored turns "
+                        f"(last: {last_error})",
                         file=sys.stderr,
                     )
                     usage.write_job_summary(status="failed")

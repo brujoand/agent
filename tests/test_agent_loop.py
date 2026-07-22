@@ -187,11 +187,20 @@ def test_aborts_after_repeated_errored_turns(monkeypatch):
     # A misconfig that makes every turn error must fail fast, not nudge-and-retry
     # until the runtime budget is spent.
     session = FakeSession(
-        [TurnResult(text="boom", usage=TurnUsage(num_turns=1), is_error=True) for _ in range(6)]
+        [
+            TurnResult(
+                text="boom",
+                usage=TurnUsage(num_turns=1),
+                is_error=True,
+                error_detail="error_during_execution: nope",
+            )
+            for _ in range(6)
+        ]
     )
     comments = []
     code, _ = run_loop(monkeypatch, session, comments)
 
     assert code == 1
     assert len(session.prompts) == agent._MAX_CONSECUTIVE_ERRORS  # bailed, didn't drain
-    assert any("repeated errors" in c for c in comments)
+    # The failure comment names the reason, not just "repeated errors".
+    assert any("repeated errors" in c and "error_during_execution" in c for c in comments)
