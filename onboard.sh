@@ -45,11 +45,12 @@ set -euo pipefail
 # fully uninstalled from the account and reinstalled.
 readonly INSTALLATION_ID="144736354"
 
-# The default ruleset. Kept next to this script so onboarding needs no checkout
-# layout beyond the script + its data file.
+# The default ruleset, shared with `agent setup rulesets` -- it lives under
+# agentcli/ as that command's package data (agentcli/rulesets.py reads the same
+# directory), so onboarding points there rather than keeping a second copy.
 SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
 readonly SCRIPT_DIR
-readonly RULESET_FILE="${SCRIPT_DIR}/ruleset_defs/protect-main-pr-only.json"
+readonly RULESET_FILE="${SCRIPT_DIR}/agentcli/ruleset_defs/protect-main-pr-only.json"
 readonly RULESET_NAME="protect-main-pr-only"
 
 # Fork-PR approval policy. `all_external_contributors` = every fork PR from an
