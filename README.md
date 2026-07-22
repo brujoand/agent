@@ -74,21 +74,40 @@ repo is private — granting it Actions access).
 Point callers at your own fork of this repo with `--reusable-repo owner/agent`
 (or `$AGENT_REUSABLE_REPO`).
 
-## Rotating the shared `CLAUDE_CODE_OAUTH_TOKEN`
+## Syncing a secret to every installed repo
 
-`claude setup-token` tokens expire, and once one does *every* agent run fails to
-authenticate (the SDK returns `401 Invalid bearer token`). GitHub never lets you
-read an Actions secret back, so there is no "copy it from one repo to the rest" —
-you mint a fresh value and push it everywhere the App is installed:
+`scripts/sync-repo-secret.sh <NAME>` pushes one Actions secret to every repo the
+App is installed on. GitHub never lets you read a secret back, so there is no
+"copy it from one repo to the rest" — you supply the value once and it fans out.
+The value is never an argument (that leaks into shell history and the process
+list): on a terminal the script prompts for a hidden paste, otherwise it reads
+stdin.
 
 ```bash
-claude setup-token | scripts/sync-agent-secret.sh CLAUDE_CODE_OAUTH_TOKEN
-scripts/sync-agent-secret.sh CLAUDE_CODE_OAUTH_TOKEN --dry-run   # preview targets
+scripts/sync-repo-secret.sh MY_SECRET               # prompts for a hidden paste
+pass show some/secret | scripts/sync-repo-secret.sh MY_SECRET
+scripts/sync-repo-secret.sh MY_SECRET --dry-run     # preview targets, read nothing
 ```
 
 Target repos come from `agent repos` (the App's own installation list). Writing
 uses `$GH_TOKEN` if set (an App token with `secrets: write`), else your `gh
-auth` session. See the script header for the full contract.
+auth` session.
+
+### Rotating the shared `CLAUDE_CODE_OAUTH_TOKEN`
+
+`claude setup-token` tokens expire, and once one does *every* agent run fails to
+authenticate (the SDK returns `401 Invalid bearer token`). The
+`sync-agent-secret.sh` wrapper is `sync-repo-secret.sh` with the name fixed to
+`CLAUDE_CODE_OAUTH_TOKEN`. Mint a fresh token on its own (it opens a browser),
+then paste it at the prompt:
+
+```bash
+claude setup-token                     # complete the flow, copy the token
+scripts/sync-agent-secret.sh           # paste at the hidden prompt
+```
+
+Do not pipe `claude setup-token` into the script — it is interactive, and piping
+swallows its prompts and hangs.
 
 ## Hygiene: the internal-infra denylist
 
