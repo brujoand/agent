@@ -74,14 +74,18 @@ repo is private — granting it Actions access).
 Point callers at your own fork of this repo with `--reusable-repo owner/agent`
 (or `$AGENT_REUSABLE_REPO`).
 
-## Syncing a secret to every installed repo
+## Syncing a secret to every repo
 
-`scripts/sync-repo-secret.sh <NAME>` pushes one Actions secret to every repo the
-App is installed on. GitHub never lets you read a secret back, so there is no
-"copy it from one repo to the rest" — you supply the value once and it fans out.
-The value is never an argument (that leaks into shell history and the process
-list): on a terminal the script prompts for a hidden paste, otherwise it reads
-stdin.
+`scripts/sync-repo-secret.sh <NAME>` is a **maintainer setup script** — you run
+it, on your own machine, with nothing but `gh auth login`. It does **not** use
+the agent App key or the `agent` CLI: secret writes are inherently a human
+action (the App has no secrets access at all — the secrets API 403s for it), so
+both the repo listing and the write go through your `gh` credentials.
+
+GitHub never lets you read a secret back, so there is no "copy it from one repo
+to the rest" — you supply the value once and it fans out. The value is never an
+argument (that leaks into shell history and the process list): on a terminal the
+script prompts for a hidden paste, otherwise it reads stdin.
 
 ```bash
 scripts/sync-repo-secret.sh MY_SECRET               # prompts for a hidden paste
@@ -89,13 +93,11 @@ pass show some/secret | scripts/sync-repo-secret.sh MY_SECRET
 scripts/sync-repo-secret.sh MY_SECRET --dry-run     # preview targets, read nothing
 ```
 
-Target repos come from `agent repos` (the App's own installation list). Writing
-the secret, though, is a **maintainer** action — the App has no secrets access
-at all (the secrets API 403s for it) — so it uses **your** credentials:
-`$GH_TOKEN` set to a token that can write repo secrets (a PAT), or your `gh auth
-login` session. The two roles are separate, so this still runs on an agent host:
-`agent repos` lists targets via the App key while `gh` writes with your
-`$GH_TOKEN`. There is no way to do the write with agent credentials.
+Targets are the repos you own (`gh repo list`). That is a superset of where the
+agent is enabled, but setting a secret on a repo that does not use it is
+harmless — preview with `--dry-run`, trim with `--exclude`, or point at another
+account with `$SECRET_SYNC_OWNER`. Writes use your `gh auth login` session, or
+`$GH_TOKEN` if set (a PAT that can write repo secrets).
 
 ### Rotating the shared `CLAUDE_CODE_OAUTH_TOKEN`
 

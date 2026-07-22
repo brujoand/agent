@@ -1,34 +1,33 @@
 #!/usr/bin/env bash
 #
-# Fan a single GitHub Actions secret out to every repository the App is
-# installed on. Generic: give it any secret NAME and it distributes the value
-# you provide. (To rotate the issue agent's Anthropic token specifically, use
-# the sync-agent-secret.sh wrapper, which fixes the name.)
+# Fan a single GitHub Actions secret out to every repository you own. Generic:
+# give it any secret NAME and it distributes the value you provide. (To rotate
+# the issue agent's Anthropic token specifically, use the sync-agent-secret.sh
+# wrapper, which fixes the name.)
 #
-# WHY a push, not a copy: GitHub never returns an Actions secret's value -- not
-# to a repo admin, not to the App. The REST API exposes only metadata (name,
-# updated_at). So there is no "read it from repo A and copy to B" primitive.
-# You supply the value once; this script distributes it. It is never taken as an
-# argument (that would leak into shell history and the process list) -- on a
-# terminal the script prompts for a hidden paste, otherwise it reads stdin.
+# This is a MAINTAINER setup script: it runs entirely on YOUR `gh` credentials
+# and never uses the agent App key or the `agent` CLI. (The App cannot help
+# here anyway -- it has no secrets access at all; the REST secrets API 403s for
+# its token. Secret writes are inherently a human action.) So the only thing you
+# need is `gh auth login` (or $GH_TOKEN set to a token that can write repo
+# secrets -- a classic PAT with `repo`, or a fine-grained PAT with Secrets: r/w).
+#
+# WHY a push, not a copy: GitHub never returns an Actions secret's value; the
+# REST API exposes only metadata (name, updated_at). So there is no "read it
+# from repo A and copy to B" primitive. You supply the value once; this script
+# distributes it. It is never taken as an argument (that would leak into shell
+# history and the process list) -- on a terminal the script prompts for a hidden
+# paste, otherwise it reads stdin.
 #
 # The value's SOURCE is yours to choose:
 #   scripts/sync-repo-secret.sh MY_SECRET               # prompts, paste hidden
 #   pass show anthropic/oauth | scripts/sync-repo-secret.sh MY_SECRET
 #   scripts/sync-repo-secret.sh MY_SECRET < value.txt
 #
-# Target repos come from `agent repos` (the installation's own repo list), so
-# the set is whatever the App can currently reach -- nothing is hardcoded.
-#
-# Writing secrets is a MAINTAINER action -- the App has NO secrets access at all
-# (the REST secrets API 403s for its token), so the write cannot use App creds.
-# `gh` picks the write credential in order:
-#   * $GH_TOKEN if exported -- YOUR token that can write repo secrets (a classic
-#     PAT with `repo`, or a fine-grained PAT with Secrets: read/write);
-#   * otherwise your `gh auth login` session (needs admin on each target repo).
-# Note the two credentials are different: even with $GH_TOKEN set to your PAT,
-# `agent repos` still enumerates targets via the App key. So you can run this on
-# an agent host -- App lists the repos, your PAT does the writing.
+# Targets are the repos you own (via `gh repo list`). That is a superset of
+# where the agent is enabled, but setting a secret on a repo that does not use
+# it is harmless -- review with --dry-run, trim with --exclude, or point at
+# another account with $SECRET_SYNC_OWNER.
 #
 # Usage:
 #   scripts/sync-repo-secret.sh <SECRET_NAME> [--dry-run] [--exclude owner/repo]...
@@ -90,9 +89,25 @@ is_excluded() {
   return 1
 }
 
+# Enumerate candidate repos as owner/name, one per line, from your gh account.
+# $SECRET_SYNC_OWNER overrides the owner (defaults to your gh login).
+list_repos() {
+  local owner="${SECRET_SYNC_OWNER:-}"
+  [[ -z $owner ]] && owner="$(gh api user --jq .login 2>/dev/null || true)"
+  # A valid login only; reject empty or error-body garbage from an unauthed gh.
+  if [[ ! $owner =~ ^[A-Za-z0-9][A-Za-z0-9-]*$ ]]; then
+    echo "error: gh is not logged in as a user." >&2
+    echo "  run 'gh auth login', or set SECRET_SYNC_OWNER=<owner> to list a" >&2
+    echo "  specific account's repos." >&2
+    return 1
+  fi
+  gh repo list "$owner" --source --no-archived --limit 200 \
+    --json nameWithOwner -q '.[].nameWithOwner'
+}
+
 # Collect the target repos first so a dry run can print the plan without ever
 # touching stdin (no point demanding a secret you are not going to write).
-mapfile -t repos < <(agent repos | sed -E 's#^https://github.com/##; s#\.git$##')
+mapfile -t repos < <(list_repos)
 
 targets=()
 for repo in ${repos[@]+"${repos[@]}"}; do
@@ -105,7 +120,7 @@ for repo in ${repos[@]+"${repos[@]}"}; do
 done
 
 if [[ ${#targets[@]} -eq 0 ]]; then
-  echo "error: no target repos (is the App installed anywhere?)" >&2
+  echo "error: no target repos (does $([[ -n ${SECRET_SYNC_OWNER:-} ]] && echo "$SECRET_SYNC_OWNER" || echo "your account") own any non-archived, non-fork repos?)" >&2
   exit 1
 fi
 
