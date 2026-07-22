@@ -88,12 +88,16 @@ class FakeProvider:
         return self.session
 
 
-def run_loop(monkeypatch, session, comments):
+def run_loop(monkeypatch, session, comments, target_repo=None):
     """Run agent.run() with all GitHub/metrics side effects stubbed out."""
     monkeypatch.setenv("GITHUB_REPOSITORY", "brujoand/gitops-homelab")
     monkeypatch.setenv("ISSUE_NUMBER", "42")
     monkeypatch.delenv("TARGET_KIND", raising=False)
     monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    if target_repo:
+        monkeypatch.setenv("AGENT_TARGET_REPO", target_repo)
+    else:
+        monkeypatch.delenv("AGENT_TARGET_REPO", raising=False)
 
     provider = FakeProvider(session)
     monkeypatch.setattr(agent, "create_provider", lambda name: provider)
@@ -166,3 +170,28 @@ def test_run_nudges_when_no_marker(monkeypatch):
     # Bare <<<DONE>>> still closes the session with the footer-only comment.
     assert len(comments) == 1
     assert "Session ended" in comments[0]
+
+
+def test_agent_target_repo_overrides_github_repository(monkeypatch):
+    # The hub runs one workflow against many repos; AGENT_TARGET_REPO is what the
+    # agent must operate on, not the workflow's own GITHUB_REPOSITORY.
+    session = FakeSession([TurnResult(text="<<<DONE>>>", usage=TurnUsage(num_turns=1))])
+    code, provider = run_loop(monkeypatch, session, [], target_repo="brujoand/tracktor")
+    assert code == 0
+    # Session id (and thus everything downstream) keys on the TARGET repo.
+    assert provider.config.session_id == agent.session_id_for("brujoand/tracktor", "42")
+    assert "brujoand/tracktor" in session.prompts[0]
+
+
+def test_aborts_after_repeated_errored_turns(monkeypatch):
+    # A misconfig that makes every turn error must fail fast, not nudge-and-retry
+    # until the runtime budget is spent.
+    session = FakeSession(
+        [TurnResult(text="boom", usage=TurnUsage(num_turns=1), is_error=True) for _ in range(6)]
+    )
+    comments = []
+    code, _ = run_loop(monkeypatch, session, comments)
+
+    assert code == 1
+    assert len(session.prompts) == agent._MAX_CONSECUTIVE_ERRORS  # bailed, didn't drain
+    assert any("repeated errors" in c for c in comments)
