@@ -146,6 +146,24 @@ def test_run_turn_propagates_is_error(monkeypatch):
     assert turn.is_error is True
 
 
+def test_run_turn_captures_error_detail(monkeypatch):
+    # On error, the reason (subtype + message) is captured so a failed run is not
+    # an opaque "err=True".
+    script = [result_message(is_error=True, subtype="error_during_execution", result="boom")]
+    session = open_faked_session(monkeypatch, CFG, script)
+    turn = anyio.run(session.run_turn, "p")
+    assert turn.is_error is True
+    assert "error_during_execution" in turn.error_detail
+    assert "boom" in turn.error_detail
+
+
+def test_run_turn_no_error_detail_on_success(monkeypatch):
+    session = open_faked_session(monkeypatch, CFG, [result_message()])
+    turn = anyio.run(session.run_turn, "p")
+    assert turn.is_error is False
+    assert turn.error_detail == ""
+
+
 def test_open_session_fresh_sets_session_id(monkeypatch):
     monkeypatch.delenv("AGENT_CLUSTER_TOOLS", raising=False)
     session = open_faked_session(monkeypatch, CFG, [])

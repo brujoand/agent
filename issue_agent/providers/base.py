@@ -61,6 +61,10 @@ class TurnResult:
     usage: TurnUsage | None
     session_id: str | None = None
     is_error: bool = False
+    # When is_error: a short human-readable reason (provider subtype + message),
+    # so a failed run says WHY in the log and the failure comment instead of just
+    # "err=True". Empty otherwise.
+    error_detail: str = ""
 
 
 @runtime_checkable

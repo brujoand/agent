@@ -198,9 +198,18 @@ class ClaudeSession:
             )
             session_id = result.session_id
             is_error = bool(result.is_error)
+        # On error, capture WHY: the SDK's subtype (e.g. error_max_turns,
+        # error_during_execution) plus any result text. Without this a failed turn
+        # is an opaque "err=True".
+        error_detail = ""
+        if is_error and result is not None:
+            subtype = getattr(result, "subtype", None) or "unknown"
+            detail = str(getattr(result, "result", "") or "")
+            error_detail = f"{subtype}: {detail}".strip(": ").strip()
         return TurnResult(
             text="\n".join(texts),
             usage=usage,
             session_id=session_id,
             is_error=is_error,
+            error_detail=error_detail,
         )
