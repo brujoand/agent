@@ -189,12 +189,21 @@ def test_dry_run_never_writes(monkeypatch, existing, detail, expected):
 # --- the shipped definition --------------------------------------------------
 
 
-def test_shipped_ruleset_loads_and_omits_bypass_actors():
-    """bypass_actors are per-account ids that do not port across repos; declaring
-    them would risk silently granting the agent a bypass."""
+def test_shipped_ruleset_exempts_only_the_admin_role():
+    """The one bypass actor is the built-in Repository admin role (id 5). It ports
+    cleanly across repos (a GitHub built-in, identical everywhere) and never
+    applies to brujoand-agent[bot], which is not an admin -- so the human account
+    owner can merge their own PRs (no self-approval on a solo account) while the
+    agent still cannot merge its own. Per-account user/Integration ids (e.g.
+    Renovate) are deliberately NOT declared: those do not port and could silently
+    grant a bypass to the wrong actor."""
     desired = rulesets.load("protect-main-pr-only")
     assert desired["name"] == "protect-main-pr-only"
-    assert "bypass_actors" not in desired
+    assert desired["bypass_actors"] == [
+        {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+    ]
+    # nothing per-account: only built-in RepositoryRole actors may be declared.
+    assert all(a["actor_type"] == "RepositoryRole" for a in desired["bypass_actors"])
     assert {r["type"] for r in desired["rules"]} == {"deletion", "non_fast_forward", "pull_request"}
 
 
