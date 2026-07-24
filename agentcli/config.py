@@ -71,3 +71,50 @@ def repo_path(repo: str) -> Path:
 
 def worktree_base(repo: str) -> Path:
     return Path.home() / "worktrees" / repo
+
+
+# --- agent-access: step-ca SSH certificates -------------------------------
+#
+# Agents mint short-lived SSH certificates from step-ca bearing the
+# `agent-baseline` principal, which hosts map to a login as the unprivileged
+# `brujoand-agent` user (gitops-homelab: ansible role `agent_access`). This is
+# the baseline; elevated access is added later via the broker.
+STEP_CA_URL = os.environ.get("STEP_CA_URL", "https://step-ca.brujordet.no")
+
+# The CA root fingerprint, used to download+verify the root cert without TOFU.
+# Public; overridable if the CA is re-bootstrapped.
+STEP_CA_FINGERPRINT = os.environ.get(
+    "STEP_CA_FINGERPRINT",
+    "a2d4a2ef24f1313b21af3459e725bec1950bf6457221ce17644916a9aa818422",
+)
+
+# The JWK provisioner that signs baseline SSH certs, and the env / ~/.bash_private
+# var holding its password (baked out-of-band by `lab agent bootstrap`, same
+# contract as the App key -- the agent host has no 1Password).
+STEP_CA_PROVISIONER = os.environ.get("STEP_CA_PROVISIONER", "agent-baseline")
+STEP_CA_PROVISIONER_PW_VAR = "STEP_CA_PROVISIONER_PASSWORD"
+
+# The principal a baseline cert carries and the OS user it logs into.
+SSH_BASELINE_PRINCIPAL = "agent-baseline"
+AGENT_SSH_USER = "brujoand-agent"
+
+# Default cert lifetime. Kept at/under the provisioner's maxUserSSHCertDuration.
+SSH_CERT_TTL = os.environ.get("STEP_CA_SSH_TTL", "1h")
+
+
+def ssh_dir() -> Path:
+    """Agent-owned dir (0700) for the baseline key/cert -- not the user's ~/.ssh."""
+    return cache_dir() / "ssh"
+
+
+def ssh_key_path() -> Path:
+    return ssh_dir() / "agent_access_key"
+
+
+def ssh_cert_path() -> Path:
+    # step writes the cert alongside the key as <key>-cert.pub.
+    return ssh_dir() / "agent_access_key-cert.pub"
+
+
+def step_root_path() -> Path:
+    return ssh_dir() / "step_root_ca.crt"

@@ -61,6 +61,29 @@ def _parse_private_env(path) -> dict[str, str]:
     return found
 
 
+def read_private_var(name: str, path=PRIVATE_ENV) -> str | None:
+    """Read a single `export NAME=value` from ~/.bash_private.
+
+    The App-cred parser above whitelists its own keys; this is the general reader
+    for other agent secrets baked in by `lab agent bootstrap` (e.g. the step-ca
+    provisioner password). Callers should prefer the environment first.
+    """
+    try:
+        text = path.read_text()
+    except OSError:
+        return None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line.startswith("export "):
+            continue
+        key, sep, value = line[len("export ") :].partition("=")
+        if sep and key == name:
+            parts = shlex.split(value)
+            if parts:
+                return parts[0]
+    return None
+
+
 def _read_pem_file(path_str: str) -> str:
     path = Path(path_str)
     try:
