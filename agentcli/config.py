@@ -75,28 +75,24 @@ def worktree_base(repo: str) -> Path:
 
 # --- agent-access: step-ca SSH certificates -------------------------------
 #
-# Agents mint short-lived SSH certificates from step-ca bearing the
-# `agent-baseline` principal, which hosts map to a login as the unprivileged
-# `brujoand-agent` user (gitops-homelab: ansible role `agent_access`). This is
-# the baseline; elevated access is added later via the broker.
-STEP_CA_URL = os.environ.get("STEP_CA_URL", "https://step-ca.brujordet.no")
+# Agents mint short-lived SSH certificates and log in as an unprivileged user.
+# Every deployment-specific value comes from the environment (baked into the
+# agent's private env by its bootstrap) -- no CA endpoint, fingerprint, domain or
+# account name is hardcoded here, so this repo stays free of any one deployment.
+#
+# The CA URL and root fingerprint have NO defaults on purpose: without them the
+# SSH commands fail closed with a clear message rather than trusting a wrong CA.
+STEP_CA_URL = os.environ.get("STEP_CA_URL")
+STEP_CA_FINGERPRINT = os.environ.get("STEP_CA_FINGERPRINT")
 
-# The CA root fingerprint, used to download+verify the root cert without TOFU.
-# Public; overridable if the CA is re-bootstrapped.
-STEP_CA_FINGERPRINT = os.environ.get(
-    "STEP_CA_FINGERPRINT",
-    "a2d4a2ef24f1313b21af3459e725bec1950bf6457221ce17644916a9aa818422",
-)
-
-# The JWK provisioner that signs baseline SSH certs, and the env / ~/.bash_private
-# var holding its password (baked out-of-band by `lab agent bootstrap`, same
-# contract as the App key -- the agent host has no 1Password).
+# The JWK provisioner that signs baseline certs and the env var holding its
+# password (provisioned out-of-band, same contract as the App key).
 STEP_CA_PROVISIONER = os.environ.get("STEP_CA_PROVISIONER", "agent-baseline")
 STEP_CA_PROVISIONER_PW_VAR = "STEP_CA_PROVISIONER_PASSWORD"
 
 # The principal a baseline cert carries and the OS user it logs into.
-SSH_BASELINE_PRINCIPAL = "agent-baseline"
-AGENT_SSH_USER = "brujoand-agent"
+SSH_BASELINE_PRINCIPAL = os.environ.get("STEP_CA_SSH_PRINCIPAL", "agent-baseline")
+AGENT_SSH_USER = os.environ.get("AGENT_SSH_USER", "agent")
 
 # Default cert lifetime. Kept at/under the provisioner's maxUserSSHCertDuration.
 SSH_CERT_TTL = os.environ.get("STEP_CA_SSH_TTL", "1h")

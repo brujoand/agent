@@ -62,11 +62,10 @@ def _parse_private_env(path) -> dict[str, str]:
 
 
 def read_private_var(name: str, path=PRIVATE_ENV) -> str | None:
-    """Read a single `export NAME=value` from ~/.bash_private.
+    """Look up one bootstrap-provided variable by name (env is preferred first).
 
-    The App-cred parser above whitelists its own keys; this is the general reader
-    for other agent secrets baked in by `lab agent bootstrap` (e.g. the step-ca
-    provisioner password). Callers should prefer the environment first.
+    The App-cred parser above only recognises its own keys; this serves the rest.
+    Same parsing rules as `_parse_private_env`.
     """
     try:
         text = path.read_text()

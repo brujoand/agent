@@ -1,11 +1,12 @@
 """Baseline SSH access via step-ca certificates.
 
-Mints a short-lived SSH user certificate bearing the `agent-baseline` principal
-and logs in as the unprivileged `brujoand-agent` user. This is the baseline path
-of the agent-access system: it talks to step-ca directly with the `agent-baseline`
-JWK provisioner (no broker yet). Elevated, approval-gated grants come later.
+Mints a short-lived SSH user certificate bearing the baseline principal and logs
+in as the configured unprivileged user. This is the baseline path of the
+agent-access system: it talks to step-ca directly with the baseline JWK
+provisioner (no broker yet). Elevated, approval-gated grants come later.
 
-`step` (Smallstep CLI) does the crypto; we orchestrate it and cache the cert.
+`step` (Smallstep CLI) does the crypto; we orchestrate it and cache the cert. The
+CA endpoint, root fingerprint and account name all come from the environment.
 """
 
 from __future__ import annotations
@@ -20,13 +21,23 @@ from pathlib import Path
 
 from agentcli import config
 from agentcli.creds import read_private_var
-from agentcli.errors import AgentAuthError, AgentError
+from agentcli.errors import AgentAuthError, AgentConfigError, AgentError
 
 _TTL_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
 
 def _meta_path() -> Path:
     return config.ssh_dir() / "cert-meta.json"
+
+
+def _require_ca_config() -> tuple[str, str]:
+    """CA URL + root fingerprint, from the environment. Fail closed if unset."""
+    if not config.STEP_CA_URL or not config.STEP_CA_FINGERPRINT:
+        raise AgentConfigError(
+            "STEP_CA_URL and STEP_CA_FINGERPRINT must be set (the CA endpoint and "
+            "root fingerprint for your deployment; provisioned by the agent bootstrap)."
+        )
+    return config.STEP_CA_URL, config.STEP_CA_FINGERPRINT
 
 
 def _run_step(args: list[str]) -> subprocess.CompletedProcess:
@@ -68,7 +79,8 @@ def _ensure_dir() -> Path:
 
 
 def _ensure_root_cert() -> Path:
-    """Download + verify the CA root against the known fingerprint (no TOFU)."""
+    """Download + verify the CA root against the configured fingerprint (no TOFU)."""
+    ca_url, fingerprint = _require_ca_config()
     root = config.step_root_path()
     if root.exists():
         return root
@@ -79,9 +91,9 @@ def _ensure_root_cert() -> Path:
             "root",
             str(root),
             "--ca-url",
-            config.STEP_CA_URL,
+            ca_url,
             "--fingerprint",
-            config.STEP_CA_FINGERPRINT,
+            fingerprint,
             "--force",
         ]
     )
@@ -170,7 +182,7 @@ def describe_cert() -> str:
 
 
 def ssh(host: str, argv: list[str]) -> None:
-    """Ensure a valid baseline cert, then exec ssh as brujoand-agent@host."""
+    """Ensure a valid baseline cert, then exec ssh as the configured user@host."""
     key, cert = ensure_cert()
     _exec(
         [

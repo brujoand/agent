@@ -16,6 +16,9 @@ def _isolate(tmp_path, monkeypatch):
     # cache_dir() -> tmp so ssh_dir()/key/cert/root/meta all land under tmp.
     monkeypatch.setattr(config, "cache_dir", lambda: tmp_path / "agent")
     monkeypatch.setattr(config, "PRIVATE_ENV", tmp_path / "absent")
+    # Deployment-specific values have no hardcoded defaults; supply test ones.
+    monkeypatch.setattr(config, "STEP_CA_URL", "https://ca.test")
+    monkeypatch.setattr(config, "STEP_CA_FINGERPRINT", "deadbeef")
     monkeypatch.setenv(config.STEP_CA_PROVISIONER_PW_VAR, "s3cret")
 
 
@@ -120,6 +123,15 @@ def test_cert_valid_false_when_expired(fake_step, monkeypatch):
 
 def test_cert_valid_false_without_cert():
     assert ssh.cert_valid() is False
+
+
+def test_mint_fails_closed_without_ca_config(fake_step, monkeypatch):
+    from agentcli.errors import AgentConfigError
+
+    monkeypatch.setattr(config, "STEP_CA_URL", None)
+    with pytest.raises(AgentConfigError):
+        ssh.mint_baseline_cert("1h")
+    assert fake_step.calls == []  # nothing ran; no wrong CA trusted
 
 
 def test_ensure_cert_reuses_valid_without_reminting(fake_step):
