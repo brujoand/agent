@@ -8,6 +8,53 @@ Facts about this machine, true in every session — including worktrees under
 Repo-specific rules live in each repo's own `CLAUDE.md`; this file never
 overrides them.
 
+## Public by default: never leak internal infra
+
+**Most repos in this workspace are world-readable; private is the exception.**
+Before writing anything infra-shaped, know which kind you are in — **assume
+public until you have checked**:
+
+```bash
+GH_TOKEN=$(agent github token) gh repo view <owner>/<repo> --json visibility -q .visibility
+```
+
+In a **public** repo, none of the following may appear — not in code, docs,
+`CLAUDE.md`, comments, tests, fixtures, sample config, commit messages, PR
+bodies, or issue comments:
+
+1. **The maintainer's private domain** — any hostname, subdomain, or URL under
+   it.
+2. **Cluster-internal addressing** — `*.svc.cluster.local`, RFC1918 addresses
+   (`10.*`, `192.168.*`, `172.16–31.*`), node names, control-plane endpoints.
+3. **How the private infrastructure is built** — GitOps layout, k8s namespaces
+   and workload names, runner/bucket/secret-store names, App identity or
+   installation IDs, storage paths, network topology.
+4. **Where secrets live** — dotfile paths, password-manager item and field
+   names, ExternalSecret keys, secrets-file locations.
+5. **Private repositories** — never name or link one from a public repo. Even a
+   dead link tells a reader it exists.
+
+The concrete denylist — the actual domain, address ranges, and private repo
+names — lives in `~/.claude/CLAUDE.md`, which is local and never committed. That
+separation is the point: this file is itself published, so it states the policy
+and not the values.
+
+The fix is not redaction, it is **genericization**: read the value from an env
+var, flag, or config file, and use `example.com` / `<your-domain>` /
+`$CLUSTER_DOMAIN` in docs and defaults. If a public tool needs a homelab-shaped
+example, invent one.
+
+**Why:** public repos are indexed, forked, and archived (GitHub code search,
+GHArchive). A leak is permanent — a force-push rewrite does not remediate it
+(old SHAs stay reachable; forks and caches keep copies) and needs admin, which
+agents do not have. Prevention is the only real control.
+
+**Reviews must check this.** Any code review — `/code-review`, a review
+subagent, or the `pr-review` workflow — running against a public repo treats an
+internal-infra reference as a finding in its own right, not a nit. Check the diff
+against all five categories before signing off. The reusable `pr-review` workflow
+passes repo visibility into its prompt and asks for this explicitly.
+
 ## Task worktrees
 
 **The primary checkouts under `~/src` are read-only for agents.** This holds for

@@ -78,16 +78,19 @@ jobs:
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
+            REPO VISIBILITY: ${{ github.event.repository.visibility }}
 
             You are a one-shot verification reviewer. Do NOT hold a conversation,
             do NOT push commits, do NOT approve or request changes — post a single
             review comment. A human still merges.
 
-            Answer two questions, in order:
+            Answer three questions, in order:
               (1) Does the change actually DO what it is supposed to? Compare the
                   code against its stated INTENT — the linked issue and the PR
                   description.
               (2) Does it meet quality and security standards?
+              (3) If REPO VISIBILITY is `public`: does the diff leak anything
+                  internal? See step 3 — treat any hit as a blocking concern.
 
             Steps:
             1. Establish intent, then check the diff against it:
@@ -102,6 +105,24 @@ jobs:
                present, nothing half-done, no unrelated scope creep.
             2. Read CLAUDE.md and any `.claude/` conventions, then review against
                them — correctness, security, and the repo's own hard rules.
+            3. If REPO VISIBILITY is `public`, scan the diff for internal-infra
+               leakage. A public repo must never carry, in code, docs, comments,
+               tests, fixtures, sample config, or the PR body itself:
+               - the maintainer's private domain or any subdomain of it;
+               - cluster-internal addressing: `*.svc.cluster.local`, RFC1918 IPs
+                 (`10.*`, `192.168.*`, `172.16-31.*`), node/endpoint names;
+               - descriptions of how the maintainer's private infrastructure is
+                 built — GitOps layout, k8s namespaces/workloads, runner, bucket,
+                 secret-store or App identity names;
+               - where secrets live: dotfile paths, 1Password item/field names,
+                 ExternalSecret keys;
+               - names of or links to private repositories.
+               The correct fix is genericization, not deletion of the feature:
+               read the value from an env var/flag/config and use `example.com`,
+               `<your-domain>` or a placeholder in docs and defaults. Report every
+               hit as `file:line — leaks <what> — replace with <placeholder/env>`,
+               and say so plainly in the verdict line. If REPO VISIBILITY is
+               `private`, skip this step entirely and do not comment on it.
             ${{ inputs.review_prompt }}
 
             Post ONE PR comment with `gh pr comment`, formatted as:
