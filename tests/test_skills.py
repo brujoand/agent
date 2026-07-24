@@ -138,3 +138,28 @@ def test_dest_dir_honors_claude_config_dir(monkeypatch, tmp_path):
 def test_source_dir_is_agent_checkout(monkeypatch, tmp_path):
     monkeypatch.setenv("AGENT_SRC_ROOT", str(tmp_path))
     assert skills.source_dir() == tmp_path / "agent" / "skills"
+
+
+def test_install_prunes_a_link_whose_skill_left_the_source_tree(trees):
+    src, dest = trees
+    gone = _make_skill(src, "promoted-to-a-rule")
+    skills.install()
+    import shutil
+
+    shutil.rmtree(gone)
+
+    results = skills.install()
+
+    assert results == [("promoted-to-a-rule", "pruned")]
+    assert not (dest / "promoted-to-a-rule").is_symlink()
+
+
+def test_install_leaves_a_users_own_dangling_link_alone(trees):
+    src, dest = trees
+    _make_skill(src, "shared")
+    dest.mkdir(parents=True, exist_ok=True)
+    (dest / "mine").symlink_to(Path("/nowhere/mine"))
+
+    skills.install()
+
+    assert (dest / "mine").is_symlink()

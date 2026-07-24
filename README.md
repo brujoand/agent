@@ -173,17 +173,34 @@ agent lab install               # install `lab` from the sibling gitops repo
 agent lab <args...>             # run `lab` with GH_TOKEN/KUBECONFIG set
 agent skills install            # symlink the shared Claude skills into ~/.claude/skills
 agent skills list               # show each shared skill and whether it is linked
+agent rules install             # import the always-on Claude rules into ~/.claude/CLAUDE.md
+agent rules list                # show each shared rule and whether the import block is current
 ```
 
-### Shared Claude skills
+### Shared Claude skills and rules
 
-`skills/` holds the workspace's shared Claude Code skills — one source of truth,
-tracked and PR-reviewed here. `agent skills install` symlinks each into the
-user's `~/.claude/skills/`, so **one install per user** covers every repo and
-every worktree (they all read the same dir). The links point at this checkout,
-so `agent pull` fast-forwarding the agent repo updates a skill in place — no
-reinstall, no drift. `agent doctor` reports whether they are linked. Install is
-idempotent and never clobbers a skill a user placed there by hand.
+Two trees, one source of truth each, both tracked and PR-reviewed here, and both
+installed **once per user** — covering every repo and every worktree, since they
+all read the same `~/.claude`. Both point at this checkout, so `agent pull`
+fast-forwarding the agent repo updates them in place — no reinstall, no drift.
+`agent doctor` reports on both, and both installs are idempotent.
+
+| | `skills/` | `rules/` |
+|---|---|---|
+| Loaded | when Claude picks the skill | every session, everywhere |
+| Installed as | symlinks into `~/.claude/skills/` | `@`-imports in `~/.claude/CLAUDE.md` |
+| Command | `agent skills install` | `agent rules install` |
+| For | a task procedure, loaded on demand | house style and host facts |
+
+The split is the whole point: a skill is **opt-in**, so it is the wrong home for
+anything that must shape the *first* response. `working-with-brujoand` lived in
+`skills/` and was merely available — a session that never invoked it never
+followed it. As a rule it is simply there, at the cost of carrying it in every
+session, which is what always-on means.
+
+Neither install clobbers what the user owns: a hand-made skill directory is
+reported as a conflict and left alone, and `rules install` only ever rewrites
+text between its own markers in `~/.claude/CLAUDE.md`.
 
 `agent` clones sibling repos and installs `lab`, so the dependency points one way
 — **`agent` → `lab`, never back** (`agent` is what puts `lab` on disk). github.com

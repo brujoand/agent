@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agentcli import git, github, repos, skills, workspace
+from agentcli import git, github, repos, rules, skills, workspace
 from agentcli.config import DEFAULT_REPO, PRIVATE_ENV, repo_path, src_root
 from agentcli.creds import load_app_creds
 from agentcli.errors import AgentError
@@ -96,9 +96,23 @@ def _check_skills() -> bool:
     return ok
 
 
+def _check_rules() -> bool:
+    ok, detail = rules.check()
+    _line(_OK if ok else _BAD, "rules", detail)
+    return ok
+
+
 def run() -> int:
     print(f"src root: {src_root()}\n")
-    checks = [_check_creds, _check_token, _check_repos, _check_lab, _check_helpers, _check_skills]
+    checks = [
+        _check_creds,
+        _check_token,
+        _check_repos,
+        _check_lab,
+        _check_helpers,
+        _check_skills,
+        _check_rules,
+    ]
     results = [check() for check in checks]
     print()
     if all(results):

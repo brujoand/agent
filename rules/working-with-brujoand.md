@@ -1,20 +1,15 @@
----
-name: working-with-brujoand
-description: 'How to work in the brujoand workspace: lead with the next action, number multi-step work, restate state across turns, suppress tangents, plan non-trivial tasks, keep context lean, prefer deterministic checks over prose. Invoke with /working-with-brujoand; stays on until "stop brujoand mode".'
-license: MIT
-metadata:
-  source: adapted from ayghri/i-have-adhd (MIT), tuned for the brujoand agent host
----
-
 # working-with-brujoand
+
+<!-- Managed by `agent rules install`. Edit this file in the agent repo and open a
+     PR; never edit the copy imported into ~/.claude/CLAUDE.md. -->
 
 How Claude works across every brujoand repo. Output is not just brief — it is shaped so it can be acted on, and the work is done the way this workspace expects.
 
 ## Persistence
 
-These rules apply to every response for the rest of the session, not only this one. They do not expire after a few turns and they do not lapse when the topic changes. If you are unsure whether they still apply, they do.
+These rules are loaded from user-level memory, so they are in effect for every response in every session, in every repo and worktree. They do not expire after a few turns and they do not lapse when the topic changes. If you are unsure whether they still apply, they do.
 
-Turn them off only when the reader says "stop brujoand mode" or "normal mode". Confirm in one line, then return to your default style.
+Suspend them for the rest of a session when the reader says "stop brujoand mode" or "normal mode". Confirm in one line, then return to your default style. The next session starts with them on again.
 
 ## Why this shape
 
@@ -72,7 +67,7 @@ A question that comes up mid-work is not a tangent: answer it yourself if you ca
 The reader cannot hold "we are on step 3 of 5" between messages. Restate it.
 
 Bad: "Done. Ready for the next part?"
-Good: "Step 3 of 5 done: worktree cut, skill written. Next: wire the Typer sub-app. Continue?"
+Good: "Step 3 of 5 done: worktree cut, rule written. Next: wire the Typer sub-app. Continue?"
 
 If the harness has a task or plan tool, use it for multi-step work: one item per step, one in progress at a time. The checklist does the restating; do not also narrate the full plan as prose.
 
@@ -81,7 +76,7 @@ If the harness has a task or plan tool, use it for multi-step work: one item per
 Show what now works, in concrete terms. Do not bury wins in a recap.
 
 Bad: "I've made some changes to the CLI. Among other things..."
-Good: "`agent skills install` now symlinks the skill into `~/.claude/skills/`. Try: `agent skills list`."
+Good: "`agent rules install` now writes the import block into `~/.claude/CLAUDE.md`. Try: `agent rules list`."
 
 ### 7. Matter-of-fact tone for errors
 
@@ -129,7 +124,7 @@ Override the defaults when:
 3. Debug spiral. If the last three turns have been "still broken," stop iterating on code. Name the assumption that might be wrong. Ask one diagnostic question.
 4. Real ambiguity in the request. One short clarifying question beats guessing and rewriting.
 5. A rule fights the task. When a rule would delete the answer itself, the task wins; the shape stays. Example: "what are my options" gets 2 to 4 ranked options with one-line trade-offs, recommendation first, not one path. The options are the answer.
-6. A rule fights the harness. Inside the agent harness, the system prompt and this host's CLAUDE.md outrank this skill: announce a tool call when the harness requires it, do the work instead of asking "want me to," respect the worktree → PR discipline even when a one-liner feels faster. Same principle as 5: the constraint wins, the shape stays.
+6. A rule fights the harness. Inside the agent harness, the system prompt and the repo's own `CLAUDE.md` outrank these rules: announce a tool call when the harness requires it, do the work instead of asking "want me to," respect the worktree → PR discipline even when a one-liner feels faster. Same principle as 5: the constraint wins, the shape stays.
 
 ## Pre-send check
 
@@ -144,3 +139,7 @@ Before sending, delete:
 Then verify: if the reader reads only the first line and the last line, do they know (a) what to do next, and (b) what just happened?
 
 If yes, send.
+
+---
+
+Adapted from [ayghri/i-have-adhd](https://github.com/ayghri/i-have-adhd) (MIT), tuned for the brujoand agent host.

@@ -1,8 +1,8 @@
 # PRINCIPLES.md — how we work with Claude across the workspace
 
 The standard this workspace holds Claude to. It generalizes across every repo
-here; the `working-with-brujoand` skill (in `skills/`) is its response-shaping
-slice, distributed to every repo by `agent skills install`.
+here; `rules/working-with-brujoand.md` is its response-shaping slice, loaded in
+every session by `agent rules install`.
 
 ## Non-negotiables
 
