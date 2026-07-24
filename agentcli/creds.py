@@ -61,6 +61,28 @@ def _parse_private_env(path) -> dict[str, str]:
     return found
 
 
+def read_private_var(name: str, path=PRIVATE_ENV) -> str | None:
+    """Look up one bootstrap-provided variable by name (env is preferred first).
+
+    The App-cred parser above only recognises its own keys; this serves the rest.
+    Same parsing rules as `_parse_private_env`.
+    """
+    try:
+        text = path.read_text()
+    except OSError:
+        return None
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line.startswith("export "):
+            continue
+        key, sep, value = line[len("export ") :].partition("=")
+        if sep and key == name:
+            parts = shlex.split(value)
+            if parts:
+                return parts[0]
+    return None
+
+
 def _read_pem_file(path_str: str) -> str:
     path = Path(path_str)
     try:

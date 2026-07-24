@@ -71,3 +71,46 @@ def repo_path(repo: str) -> Path:
 
 def worktree_base(repo: str) -> Path:
     return Path.home() / "worktrees" / repo
+
+
+# --- agent-access: step-ca SSH certificates -------------------------------
+#
+# Agents mint short-lived SSH certificates and log in as an unprivileged user.
+# Every deployment-specific value comes from the environment (baked into the
+# agent's private env by its bootstrap) -- no CA endpoint, fingerprint, domain or
+# account name is hardcoded here, so this repo stays free of any one deployment.
+#
+# The CA URL and root fingerprint have NO defaults on purpose: without them the
+# SSH commands fail closed with a clear message rather than trusting a wrong CA.
+STEP_CA_URL = os.environ.get("STEP_CA_URL")
+STEP_CA_FINGERPRINT = os.environ.get("STEP_CA_FINGERPRINT")
+
+# The JWK provisioner that signs baseline certs and the env var holding its
+# password (provisioned out-of-band, same contract as the App key).
+STEP_CA_PROVISIONER = os.environ.get("STEP_CA_PROVISIONER", "agent-baseline")
+STEP_CA_PROVISIONER_PW_VAR = "STEP_CA_PROVISIONER_PASSWORD"
+
+# The principal a baseline cert carries and the OS user it logs into.
+SSH_BASELINE_PRINCIPAL = os.environ.get("STEP_CA_SSH_PRINCIPAL", "agent-baseline")
+AGENT_SSH_USER = os.environ.get("AGENT_SSH_USER", "agent")
+
+# Default cert lifetime. Kept at/under the provisioner's maxUserSSHCertDuration.
+SSH_CERT_TTL = os.environ.get("STEP_CA_SSH_TTL", "1h")
+
+
+def ssh_dir() -> Path:
+    """Agent-owned dir (0700) for the baseline key/cert -- not the user's ~/.ssh."""
+    return cache_dir() / "ssh"
+
+
+def ssh_key_path() -> Path:
+    return ssh_dir() / "agent_access_key"
+
+
+def ssh_cert_path() -> Path:
+    # step writes the cert alongside the key as <key>-cert.pub.
+    return ssh_dir() / "agent_access_key-cert.pub"
+
+
+def step_root_path() -> Path:
+    return ssh_dir() / "step_root_ca.crt"

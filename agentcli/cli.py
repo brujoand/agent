@@ -14,6 +14,7 @@ from agentcli import (
     rules,
     rulesets,
     skills,
+    ssh,
     workspace,
 )
 from agentcli.config import DEFAULT_REPO
@@ -41,6 +42,9 @@ setup_app = typer.Typer(
     help="Human-only privileged setup. Refuses to run with agent credentials.",
     no_args_is_help=True,
 )
+access_app = typer.Typer(
+    name="access", help="step-ca SSH access (baseline certificates).", no_args_is_help=True
+)
 
 app.add_typer(github_app)
 app.add_typer(workspace_app)
@@ -48,6 +52,7 @@ app.add_typer(issue_app)
 app.add_typer(skills_app)
 app.add_typer(rules_app)
 app.add_typer(setup_app)
+app.add_typer(access_app)
 
 
 @app.command("git-credential")
@@ -73,6 +78,35 @@ def pull_command() -> None:
 def doctor_command() -> None:
     """Check credentials, token, reachable repos, lab, and credential helpers."""
     raise typer.Exit(doctor.run())
+
+
+@app.command(
+    "ssh",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+)
+def ssh_command(ctx: typer.Context, host: str = typer.Argument(..., help="Host to reach.")) -> None:
+    """SSH to HOST as brujoand-agent, minting a baseline cert first if needed.
+
+    Extra args after HOST pass through to ssh: `agent ssh chromeheim -- uptime`.
+    """
+    ssh.ssh(host, ctx.args)
+
+
+@access_app.command("cert")
+def access_cert(
+    ttl: str = typer.Option(
+        None, help="Cert lifetime, e.g. 45m, 1h. Defaults to the configured TTL."
+    ),
+) -> None:
+    """Mint (or refresh) the baseline SSH certificate."""
+    _key, cert = ssh.mint_baseline_cert(ttl)
+    print(f"Minted baseline certificate: {cert}")
+
+
+@access_app.command("status")
+def access_status() -> None:
+    """Show the current baseline certificate (principals, validity)."""
+    print(ssh.describe_cert())
 
 
 @github_app.command("token")
