@@ -13,8 +13,8 @@
 # ruleset, (public repos only) require manual approval for external fork PRs so a
 # fork cannot reach CI -- and any agent secret wired into it -- unattended, set
 # the agent's CLAUDE_CODE_OAUTH_TOKEN Actions secret from your environment, and
-# register a `release` webhook so a published release notifies the in-cluster
-# receiver, which opens the deploy PR immediately (see RELEASE_BUMP_WEBHOOK_URL).
+# register a `registry_package` webhook so a published container image notifies
+# the in-cluster receiver, which opens the deploy PR immediately (see below).
 #
 # The webhook goes on EVERY onboarded repo, not just deployed ones: it is
 # harmless where the repo is not deployed to gitops (the receiver's `lab bump`
@@ -79,11 +79,15 @@ readonly FORK_APPROVAL_POLICY="all_external_contributors"
 # Mint its value with `claude setup-token` and export it before onboarding.
 readonly AGENT_SECRET_NAME="CLAUDE_CODE_OAUTH_TOKEN"
 
-# The release->bump webhook. A published release on the repo POSTs to the
-# in-cluster receiver, which HMAC-verifies it and runs `lab bump <app>` to open
-# the deploy PR immediately -- rather than waiting for Renovate's hourly poll
-# (Renovate stays the safety net behind it). Registered on every onboarded repo;
-# harmless where the repo is not deployed (the receiver ignores an unknown app).
+# The release->bump webhook. Subscribes to `registry_package`: when the repo
+# publishes a container image to GHCR, the payload (tag + digest) POSTs to the
+# in-cluster receiver, which HMAC-verifies it and runs `lab bump <app> <tag>
+# --digest <digest>` to open the deploy PR immediately -- rather than waiting for
+# Renovate's hourly poll (Renovate stays the safety net behind it). registry_package
+# is used, not `release`, because its payload carries the image digest, so the
+# receiver never has to read GHCR (which is blind to PRIVATE packages). Registered
+# on every onboarded repo; harmless where the repo is not deployed (the receiver
+# reports an unknown app as no_app) or the tag isn't semver (ignored).
 #
 # Both the endpoint and the HMAC secret come from the ENVIRONMENT, never
 # hardcoded. This script is public-bound, so the cluster's URL and shared secret
@@ -234,13 +238,13 @@ function webhook_apply {
   id="$(webhook_id "$slug")"
   if [[ -z $id ]]; then
     jq -n --arg url "$RELEASE_BUMP_WEBHOOK_URL" --arg secret "$RELEASE_BUMP_WEBHOOK_SECRET" \
-      '{name: "web", active: true, events: ["release"],
+      '{name: "web", active: true, events: ["registry_package"],
         config: {url: $url, content_type: "json", insecure_ssl: "0", secret: $secret}}' |
       gh api -X POST "repos/${slug}/hooks" --input - >/dev/null
     report "release-hook" "created"
   else
     jq -n --arg url "$RELEASE_BUMP_WEBHOOK_URL" --arg secret "$RELEASE_BUMP_WEBHOOK_SECRET" \
-      '{active: true, events: ["release"],
+      '{active: true, events: ["registry_package"],
         config: {url: $url, content_type: "json", insecure_ssl: "0", secret: $secret}}' |
       gh api -X PATCH "repos/${slug}/hooks/${id}" --input - >/dev/null
     report "release-hook" "updated"
