@@ -11,6 +11,7 @@ from agentcli import (
     labpass,
     pull,
     repos,
+    rules,
     rulesets,
     skills,
     workspace,
@@ -32,6 +33,9 @@ issue_app = typer.Typer(
 skills_app = typer.Typer(
     name="skills", help="Install the workspace's shared Claude skills.", no_args_is_help=True
 )
+rules_app = typer.Typer(
+    name="rules", help="Install the workspace's always-on Claude rules.", no_args_is_help=True
+)
 setup_app = typer.Typer(
     name="setup",
     help="Human-only privileged setup. Refuses to run with agent credentials.",
@@ -42,6 +46,7 @@ app.add_typer(github_app)
 app.add_typer(workspace_app)
 app.add_typer(issue_app)
 app.add_typer(skills_app)
+app.add_typer(rules_app)
 app.add_typer(setup_app)
 
 
@@ -241,3 +246,35 @@ def skills_list() -> None:
         return
     for skill in available:
         print(f"  {skill.name:<28} {skills.status(skill.name)}")
+
+
+@rules_app.command("install")
+def rules_install() -> None:
+    """Import the shared rules into ~/.claude/CLAUDE.md. Idempotent; safe to re-run.
+
+    Rules are always-on house style, so they go in user-level memory rather than
+    in a skill Claude has to choose to load. The imports point at the agent
+    checkout, so `agent pull` keeps them current with no reinstall. Start a new
+    Claude session to pick up a changed block.
+    """
+    try:
+        outcome, path = rules.install()
+    except AgentError as err:
+        print(f"ERROR: {err}")
+        raise typer.Exit(1) from err
+    for rule in rules.available():
+        print(f"  {rule.stem:<28} imported")
+    print(f"\nrules: block {outcome} in {path}")
+
+
+@rules_app.command("list")
+def rules_list() -> None:
+    """List the shared rules and whether the import block is current for this user."""
+    available = rules.available()
+    if not available:
+        print(f"no shared rules at {rules.source_dir()} -- run `agent pull` first")
+        return
+    state = rules.status()
+    for rule in available:
+        print(f"  {rule.stem:<28} {state}")
+    print(f"\n{rules.memory_file()}: {state}")

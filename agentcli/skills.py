@@ -76,6 +76,30 @@ def status(name: str) -> str:
     return "missing"
 
 
+def _prune(dest: Path) -> list[str]:
+    """Drop links to skills that left the source tree (renamed, or promoted to a rule).
+
+    Two guards. A link is only pruned if it points INTO our source tree -- a
+    user's own skill, or a link they made elsewhere, is never our business -- and
+    only if the skill is really gone: a dangling link to a skill still in the
+    tree is a *stale* link, which the install loop relinks. `install` is the only
+    command that writes to dest, so this belongs here.
+    """
+    if not dest.is_dir():
+        return []
+    src = source_dir().resolve()
+    shared = {s.name for s in available()}
+    gone = []
+    for link in sorted(dest.iterdir()):
+        if not link.is_symlink() or link.exists() or link.name in shared:
+            continue
+        target = Path(os.readlink(link))
+        if target.is_absolute() and target.parent == src:
+            link.unlink()
+            gone.append(link.name)
+    return gone
+
+
 def install() -> list[tuple[str, str]]:
     """Symlink every shared skill into the user's Claude skills dir. Idempotent.
 
@@ -86,7 +110,7 @@ def install() -> list[tuple[str, str]]:
     dest = dest_dir()
     dest.mkdir(parents=True, exist_ok=True)
 
-    results: list[tuple[str, str]] = []
+    results: list[tuple[str, str]] = [(name, "pruned") for name in _prune(dest)]
     for skill in available():
         name = skill.name
         link = dest / name

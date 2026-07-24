@@ -24,6 +24,7 @@ job), but the convention holds.
 `github.py` (App-token mint), `credential.py` (git credential helper),
 `workspace.py` (session worktrees), `pull.py` + `repos.py` (repo sync),
 `skills.py` (symlink shared Claude skills from `skills/` into `~/.claude/skills/`),
+`rules.py` (import the always-on rules in `rules/` into `~/.claude/CLAUDE.md`),
 `install.py`, `doctor.py`, `creds.py`/`labpass.py`, `config.py`, `errors.py`.
 
 `issue_agent/` is the interactive issue/PR agent, run as a flat script in its
