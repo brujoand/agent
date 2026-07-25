@@ -16,6 +16,7 @@ from agentcli import (
     rulesets,
     skills,
     ssh,
+    usage,
     workspace,
 )
 from agentcli.config import DEFAULT_REPO
@@ -83,6 +84,20 @@ def pull_command() -> None:
 def doctor_command() -> None:
     """Check credentials, token, reachable repos, lab, and credential helpers."""
     raise typer.Exit(doctor.run())
+
+
+@app.command("usage")
+def usage_command(
+    days: int = typer.Option(30, "--days", "-d", help="Window to report on."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the raw report instead of text."),
+) -> None:
+    """Report what drives Claude Code token spend: context per turn, sessions, repos.
+
+    Reads the local transcripts, not the OTel counters: the counters say how much
+    was spent, this says which turns spent it. Costs are list-price equivalents
+    for comparing sessions against each other, not a bill.
+    """
+    raise typer.Exit(usage.run(days=days, as_json=as_json))
 
 
 @app.command(
