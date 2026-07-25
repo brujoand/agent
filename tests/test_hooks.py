@@ -303,3 +303,179 @@ def test_script_skips_generic_plan_headings():
 def test_script_title_never_exceeds_the_tab_budget():
     long_prompt = "investigate the recurring storage daemon crash on the third worker node"
     assert len(_title({"session_id": "t", "prompt": long_prompt})) <= 18
+
+
+# --- context-budget.sh --------------------------------------------------------
+
+BUDGET_SCRIPT = Path(__file__).resolve().parent.parent / "hooks" / "context-budget.sh"
+
+
+def _transcript(tmp_path: Path, *lines: str) -> Path:
+    path = tmp_path / "transcript.jsonl"
+    path.write_text("".join(line + "\n" for line in lines))
+    return path
+
+
+def _usage_line(tokens: int) -> str:
+    return json.dumps({"message": {"usage": {"cache_read_input_tokens": tokens}}})
+
+
+def _budget_run(payload: dict, *, env: dict | None = None, print_mode: bool = True) -> str:
+    argv = [str(BUDGET_SCRIPT)] + (["--print"] if print_mode else [])
+    # HOME is pointed at nothing so a stray settings.json in the real home can
+    # never change what these assertions see.
+    done = subprocess.run(
+        argv,
+        input=json.dumps(payload),
+        capture_output=True,
+        text=True,
+        env={"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", **(env or {})},
+    )
+    assert done.returncode == 0, done.stderr
+    return done.stdout
+
+
+@pytest.mark.parametrize(
+    "tokens,expected",
+    [
+        (10_000, "none"),
+        (149_000, "none"),  # 59.6% -- just under the warn line
+        (150_000, "warn"),  # 60% exactly
+        (212_000, "warn"),  # 84.8% -- just under the high line
+        (212_500, "high"),  # 85% exactly
+        (900_000, "high"),
+    ],
+)
+def test_budget_script_levels_track_the_thresholds(tmp_path, tokens, expected):
+    path = _transcript(tmp_path, _usage_line(tokens))
+    out = _budget_run(
+        {"transcript_path": str(path), "session_id": "t"},
+        env={"AGENT_CONTEXT_BUDGET": "250000"},
+    )
+    assert out.split() == [expected, str(tokens), "250000"]
+
+
+def test_budget_script_sums_all_three_context_halves(tmp_path):
+    line = json.dumps(
+        {
+            "message": {
+                "usage": {
+                    "input_tokens": 1_000,
+                    "cache_creation_input_tokens": 4_000,
+                    "cache_read_input_tokens": 195_000,
+                    "output_tokens": 9_999,  # output is not resident context
+                }
+            }
+        }
+    )
+    path = _transcript(tmp_path, line)
+    out = _budget_run(
+        {"transcript_path": str(path), "session_id": "t"},
+        env={"AGENT_CONTEXT_BUDGET": "250000"},
+    )
+    assert out.split() == ["warn", "200000", "250000"]
+
+
+def test_budget_script_reads_the_newest_usage_record(tmp_path):
+    path = _transcript(tmp_path, _usage_line(10_000), "not json", _usage_line(240_000))
+    out = _budget_run(
+        {"transcript_path": str(path), "session_id": "t"},
+        env={"AGENT_CONTEXT_BUDGET": "250000"},
+    )
+    assert out.split()[:2] == ["high", "240000"]
+
+
+@pytest.mark.parametrize(
+    "payload_extra,lines",
+    [
+        ({}, ()),  # no transcript_path at all
+        ({"transcript_path": "/nonexistent/x.jsonl"}, ()),
+        ({}, ("not json at all",)),
+        ({}, ('{"message": {}}',)),  # a turn carrying no usage object
+    ],
+)
+def test_budget_script_degrades_to_none_instead_of_failing(tmp_path, payload_extra, lines):
+    payload: dict = {"session_id": "t"}
+    if lines:
+        payload["transcript_path"] = str(_transcript(tmp_path, *lines))
+    payload.update(payload_extra)
+    assert _budget_run(payload).split()[0] == "none"
+
+
+def test_budget_script_takes_its_budget_from_auto_compact_window(tmp_path):
+    config = tmp_path / "cfg"
+    config.mkdir()
+    (config / "settings.json").write_text(json.dumps({"autoCompactWindow": 400_000}))
+    path = _transcript(tmp_path, _usage_line(228_000))
+
+    out = _budget_run(
+        {"transcript_path": str(path), "session_id": "t"},
+        env={"CLAUDE_CONFIG_DIR": str(config)},
+    )
+
+    # 228k of 400k is 57% -- quiet at a window where 250k would have been loud.
+    assert out.split() == ["none", "228000", "400000"]
+
+
+@pytest.mark.parametrize("settings", ["not json at all", "{}", '{"theme": "auto"}'])
+def test_budget_script_falls_back_to_the_default_window(tmp_path, settings):
+    config = tmp_path / "cfg"
+    config.mkdir()
+    (config / "settings.json").write_text(settings)
+    path = _transcript(tmp_path, _usage_line(228_000))
+
+    out = _budget_run(
+        {"transcript_path": str(path), "session_id": "t"},
+        env={"CLAUDE_CONFIG_DIR": str(config)},
+    )
+
+    assert out.split() == ["high", "228000", "250000"]
+
+
+def test_budget_script_emits_a_system_message_and_nothing_else(tmp_path):
+    config = tmp_path / "cfg"
+    config.mkdir()
+    path = _transcript(tmp_path, _usage_line(228_000))
+
+    out = _budget_run(
+        {"transcript_path": str(path), "session_id": "loud"},
+        env={"CLAUDE_CONFIG_DIR": str(config), "AGENT_CONTEXT_BUDGET": "250000"},
+        print_mode=False,
+    )
+
+    # Bare stdout from UserPromptSubmit is injected into the model's context, so
+    # the payload must be exactly the systemMessage envelope -- no stray text.
+    assert set(json.loads(out)) == {"systemMessage"}
+    assert "/clear" in json.loads(out)["systemMessage"]
+
+
+def test_budget_script_warns_once_per_threshold_per_session(tmp_path):
+    config = tmp_path / "cfg"
+    config.mkdir()
+    path = _transcript(tmp_path, _usage_line(160_000))
+    env = {"CLAUDE_CONFIG_DIR": str(config), "AGENT_CONTEXT_BUDGET": "250000"}
+    payload = {"transcript_path": str(path), "session_id": "once"}
+
+    first = _budget_run(payload, env=env, print_mode=False)
+    second = _budget_run(payload, env=env, print_mode=False)
+
+    assert json.loads(first)["systemMessage"]
+    assert second == ""
+
+    # Crossing into the next threshold is a new warning, not a silenced repeat.
+    path.write_text(_usage_line(240_000) + "\n")
+    assert json.loads(_budget_run(payload, env=env, print_mode=False))["systemMessage"]
+
+
+def test_budget_script_stays_silent_below_the_threshold(tmp_path):
+    config = tmp_path / "cfg"
+    config.mkdir()
+    path = _transcript(tmp_path, _usage_line(10_000))
+
+    out = _budget_run(
+        {"transcript_path": str(path), "session_id": "quiet"},
+        env={"CLAUDE_CONFIG_DIR": str(config), "AGENT_CONTEXT_BUDGET": "250000"},
+        print_mode=False,
+    )
+
+    assert out == ""

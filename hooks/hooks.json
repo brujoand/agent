@@ -15,6 +15,11 @@
           "script": "tmux-title.sh",
           "timeout": 5,
           "async": true
+        },
+        {
+          "type": "command",
+          "script": "context-budget.sh",
+          "timeout": 5
         }
       ]
     }
