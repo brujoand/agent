@@ -175,32 +175,47 @@ agent skills install            # symlink the shared Claude skills into ~/.claud
 agent skills list               # show each shared skill and whether it is linked
 agent rules install             # import the always-on Claude rules into ~/.claude/CLAUDE.md
 agent rules list                # show each shared rule and whether the import block is current
+agent hooks install             # link the shared Claude hooks AND wire them into settings.json
+agent hooks list                # show each shared hook, where it is wired, and whether it is linked
+agent install                   # all three of the above at once (--lab to add the lab CLI)
 ```
 
-### Shared Claude skills and rules
+### Shared Claude skills, rules, and hooks
 
-Two trees, one source of truth each, both tracked and PR-reviewed here, and both
+Three trees, one source of truth each, all tracked and PR-reviewed here, and all
 installed **once per user** — covering every repo and every worktree, since they
-all read the same `~/.claude`. Both point at this checkout, so `agent pull`
+all read the same `~/.claude`. All three point at this checkout, so `agent pull`
 fast-forwarding the agent repo updates them in place — no reinstall, no drift.
-`agent doctor` reports on both, and both installs are idempotent.
+`agent doctor` reports on all three, every install is idempotent, and `agent
+install` runs them together for a fresh host.
 
-| | `skills/` | `rules/` |
-|---|---|---|
-| Loaded | when Claude picks the skill | every session, everywhere |
-| Installed as | symlinks into `~/.claude/skills/` | `@`-imports in `~/.claude/CLAUDE.md` |
-| Command | `agent skills install` | `agent rules install` |
-| For | a task procedure, loaded on demand | house style and host facts |
+| | `skills/` | `rules/` | `hooks/` |
+|---|---|---|---|
+| Loaded | when Claude picks the skill | every session, everywhere | when its event fires |
+| Installed as | symlinks into `~/.claude/skills/` | `@`-imports in `~/.claude/CLAUDE.md` | symlinks into `~/.claude/hooks/` **+ entries in `~/.claude/settings.json`** |
+| Command | `agent skills install` | `agent rules install` | `agent hooks install` |
+| For | a task procedure, loaded on demand | house style and host facts | a deterministic reaction to an event |
 
-The split is the whole point: a skill is **opt-in**, so it is the wrong home for
-anything that must shape the *first* response. `working-with-brujoand` lived in
-`skills/` and was merely available — a session that never invoked it never
-followed it. As a rule it is simply there, at the cost of carrying it in every
-session, which is what always-on means.
+The skill/rule split is the whole point: a skill is **opt-in**, so it is the
+wrong home for anything that must shape the *first* response.
+`working-with-brujoand` lived in `skills/` and was merely available — a session
+that never invoked it never followed it. As a rule it is simply there, at the
+cost of carrying it in every session, which is what always-on means. A hook is
+neither: it is not in the model's context at all, it is the harness running a
+command when something happens — which is where a check belongs once it can be
+made deterministic.
 
-Neither install clobbers what the user owns: a hand-made skill directory is
-reported as a conflict and left alone, and `rules install` only ever rewrites
-text between its own markers in `~/.claude/CLAUDE.md`.
+Hooks are the one tree that needs two halves installed. Claude Code runs a hook
+because some `settings.json` *names* it, not because the file exists, so a
+symlink alone installs a silent no-op. Each hook's event and matcher therefore
+live in `hooks/hooks.json`, reviewed in the same diff as the script, and
+`hooks install` merges them into the user's settings.
+
+No install clobbers what the user owns: a hand-made skill directory or hook file
+is reported as a conflict and left alone, `rules install` only ever rewrites text
+between its own markers in `~/.claude/CLAUDE.md`, and `hooks install` only ever
+touches settings entries pointing at a script of ours — a hand-wired hook in the
+same file is left exactly as it is.
 
 `agent` clones sibling repos and installs `lab`, so the dependency points one way
 — **`agent` → `lab`, never back** (`agent` is what puts `lab` on disk). github.com

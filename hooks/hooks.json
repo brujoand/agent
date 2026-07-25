@@ -1,0 +1,35 @@
+{
+  "_comment": [
+    "Where each tracked hook script is wired into ~/.claude/settings.json.",
+    "Claude Code's own hooks schema, with one substitution: `script` names a",
+    "file in this directory and `agent hooks install` renders it into the",
+    "`command` the user's settings need. Nothing here hardcodes ~/.claude, so",
+    "CLAUDE_CONFIG_DIR keeps working.",
+    "A script with no entry here is installed but never fires -- add it."
+  ],
+  "UserPromptSubmit": [
+    {
+      "hooks": [
+        {
+          "type": "command",
+          "script": "tmux-title.sh",
+          "timeout": 5,
+          "async": true
+        }
+      ]
+    }
+  ],
+  "PostToolUse": [
+    {
+      "matcher": "ExitPlanMode",
+      "hooks": [
+        {
+          "type": "command",
+          "script": "tmux-title.sh",
+          "timeout": 5,
+          "async": true
+        }
+      ]
+    }
+  ]
+}

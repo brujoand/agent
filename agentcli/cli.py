@@ -6,6 +6,7 @@ from agentcli import (
     credential,
     doctor,
     github,
+    hooks,
     install,
     issue_enable,
     labpass,
@@ -37,6 +38,9 @@ skills_app = typer.Typer(
 rules_app = typer.Typer(
     name="rules", help="Install the workspace's always-on Claude rules.", no_args_is_help=True
 )
+hooks_app = typer.Typer(
+    name="hooks", help="Install the workspace's shared Claude hooks.", no_args_is_help=True
+)
 setup_app = typer.Typer(
     name="setup",
     help="Human-only privileged setup. Refuses to run with agent credentials.",
@@ -51,6 +55,7 @@ app.add_typer(workspace_app)
 app.add_typer(issue_app)
 app.add_typer(skills_app)
 app.add_typer(rules_app)
+app.add_typer(hooks_app)
 app.add_typer(setup_app)
 app.add_typer(access_app)
 
@@ -312,3 +317,86 @@ def rules_list() -> None:
     for rule in available:
         print(f"  {rule.stem:<28} {state}")
     print(f"\n{rules.memory_file()}: {state}")
+
+
+@hooks_app.command("install")
+def hooks_install() -> None:
+    """Link the shared hooks into ~/.claude/hooks/ AND wire them into settings.json.
+
+    Both halves, always: a hook Claude Code's settings do not name never runs, so
+    a symlink alone would install a silent no-op. The links point at the agent
+    checkout, so `agent pull` keeps them current with no reinstall.
+    """
+    try:
+        results, outcome, path = hooks.install()
+    except AgentError as err:
+        print(f"ERROR: {err}")
+        raise typer.Exit(1) from err
+    for name, state in results:
+        print(f"  {name:<28} {state}")
+    print(f"\nhooks: {len(results)} shared hook(s) -> {hooks.dest_dir()}")
+    print(f"       wiring {outcome} in {path}")
+
+
+@hooks_app.command("list")
+def hooks_list() -> None:
+    """List the shared hooks, where each is wired, and whether it is linked."""
+    available = hooks.available()
+    if not available:
+        print(f"no shared hooks at {hooks.source_dir()} -- run `agent pull` first")
+        return
+    events: dict[str, list[str]] = {}
+    for event, groups in hooks.declaration().items():
+        for group in groups:
+            label = f"{event}/{group['matcher']}" if group.get("matcher") else event
+            for entry in group.get("hooks", []):
+                events.setdefault(entry["script"], []).append(label)
+    for script in available:
+        wired = ", ".join(events.get(script.name, [])) or "NOT WIRED"
+        print(f"  {script.name:<28} {hooks.status(script.name):<10} {wired}")
+    print(f"\n{hooks.settings_file()}: wiring {hooks.settings_status()}")
+
+
+# One command for a fresh host. Each installer is idempotent and independent, so
+# this is only ever a convenience -- and it keeps every future distribution tree
+# reachable from one place instead of a growing list to remember.
+@app.command("install")
+def install_command(
+    lab: bool = typer.Option(
+        False, "--lab", help="Also install the lab CLI (needs the sibling gitops checkout)."
+    ),
+) -> None:
+    """Install everything this repo distributes: skills, rules, and hooks.
+
+    `lab` is opt-in: it provisions a toolchain over the network and needs a
+    sibling checkout, so a routine `agent install` should not depend on it.
+    """
+    failures = 0
+    for label, run in (
+        ("skills", lambda: f"{len(skills.install())} linked -> {skills.dest_dir()}"),
+        ("rules", lambda: f"block {rules.install()[0]} in {rules.memory_file()}"),
+        ("hooks", lambda: _install_hooks_summary()),
+    ):
+        try:
+            print(f"  {label:<8} {run()}")
+        except AgentError as err:
+            print(f"  {label:<8} ERROR: {err}")
+            failures += 1
+
+    if lab:
+        try:
+            install.run()
+        except AgentError as err:
+            print(f"  lab      ERROR: {err}")
+            failures += 1
+    else:
+        print("\n  lab      skipped -- run `agent install --lab` to install it too")
+
+    print(f"\ninstall: {'all set' if not failures else f'{failures} step(s) failed'}")
+    print("Start a new Claude session to pick up newly linked skills, rules, and hooks.")
+    raise typer.Exit(1 if failures else 0)
+
+
+def _install_hooks_summary() -> str:
+    results, outcome, path = hooks.install()
+    return f"{len(results)} linked -> {hooks.dest_dir()}, wiring {outcome} in {path}"
