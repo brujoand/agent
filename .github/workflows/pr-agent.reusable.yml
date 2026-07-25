@@ -30,8 +30,10 @@ on:
         type: string
         required: false
         default: ""
-      metrics_pushgateway:
-        description: Prometheus pushgateway URL. Empty = disabled.
+      otlp_metrics_endpoint:
+        description: >-
+          OTLP base URL for Claude Code usage telemetry (the exporter appends
+          /v1/metrics). Empty = telemetry disabled.
         type: string
         required: false
         default: ""
@@ -99,7 +101,16 @@ jobs:
           AGENT_MODEL: ${{ inputs.model }}
           MINIO_ENDPOINT_URL: ${{ inputs.session_store_endpoint }}
           MINIO_BUCKET: ${{ inputs.session_store_bucket }}
-          PUSHGATEWAY_URL: ${{ inputs.metrics_pushgateway }}
+          CLAUDE_CODE_ENABLE_TELEMETRY: ${{ inputs.otlp_metrics_endpoint && '1' || '' }}
+          OTEL_METRICS_EXPORTER: ${{ inputs.otlp_metrics_endpoint && 'otlp' || '' }}
+          OTEL_LOGS_EXPORTER: none
+          OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+          OTEL_EXPORTER_OTLP_ENDPOINT: ${{ inputs.otlp_metrics_endpoint }}
+          # Prometheus's OTLP receiver rejects delta temporality outright
+          # ("invalid temporality and type combination"), so pin cumulative.
+          OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE: cumulative
+          OTEL_METRICS_INCLUDE_ACCOUNT_UUID: "false"
+          OTEL_METRICS_INCLUDE_ENTRYPOINT: "true"
           MAX_RUNTIME_SECONDS: "2940"
         run: |
           PYTHONPATH=/opt/issue-agent \
