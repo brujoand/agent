@@ -37,7 +37,6 @@ def test_run_record_defaults_source_to_human(monkeypatch):
 
 
 def test_usage_tracker_accumulates_turn_usage(monkeypatch):
-    monkeypatch.setattr(agent.UsageTracker, "push", lambda self: None)
     tracker = agent.UsageTracker(issue="7", model="m")
     tracker.record(TurnUsage(input_tokens=10, output_tokens=5, cost_usd=0.1, num_turns=2))
     tracker.record(
@@ -107,7 +106,6 @@ def run_loop(monkeypatch, session, comments, target_repo=None):
     )
     monkeypatch.setattr(agent, "gh", lambda *a, **k: "")
     monkeypatch.setattr(agent, "open_pr_for_issue", lambda repo, issue: None)
-    monkeypatch.setattr(agent.UsageTracker, "push", lambda self: None)
     return anyio.run(agent.run), provider
 
 

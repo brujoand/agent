@@ -124,7 +124,7 @@ Runtime env / reusable-workflow inputs (all optional unless noted):
 | `runner` | `ubuntu-latest` | `runs-on` label for the jobs |
 | `model` / `AGENT_MODEL` | `claude-opus-4-8` | model id passed to the provider |
 | `session_store_endpoint`/`_bucket` + `AWS_*` | *(empty → stateless)* | MinIO/S3 for transcript persistence + cross-timeout resume |
-| `metrics_pushgateway` / `PUSHGATEWAY_URL` | *(empty → off)* | Prometheus pushgateway for per-run token/cost metrics |
+| `otlp_metrics_endpoint` | *(empty → off)* | OTLP base URL for usage telemetry. The SDK spawns the `claude` CLI with this process's env, so the CLI's own OpenTelemetry exporter reports `claude_code.*` metrics tagged `app.entrypoint=sdk-py` — the same series an interactive session produces. A Prometheus OTLP receiver requires cumulative temporality; the workflow sets it. |
 | `AGENT_BASE_BRANCH` | *(repo default branch)* | PR base branch |
 | `AGENT_PLAYBOOK` | `.claude/commands/triage-and-fix.md` | repo playbook; falls back to a generic one shipped with the agent |
 

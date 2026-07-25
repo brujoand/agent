@@ -64,8 +64,11 @@ Environment:
   AGENT_BOT_LOGIN      (optional) the agent App's bare login (e.g. brujoand-agent);
                        identifies the agent's own comments and forms the @mention
                        handle. Set it to your App's login. Default: brujoand-agent.
-  PUSHGATEWAY_URL      (optional) Prometheus pushgateway for per-run token/cost
-                       metrics; unset = metrics disabled.
+  CLAUDE_CODE_ENABLE_TELEMETRY and OTEL_* (optional) usage telemetry. Not read
+                       here — the Claude Code CLI the SDK spawns inherits this
+                       process's env and exports `claude_code.*` metrics itself.
+                       Prometheus's OTLP receiver needs
+                       OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=cumulative.
 
 Claude provider only (AGENT_PROVIDER=claude):
   CLAUDE_CODE_OAUTH_TOKEN (required) consumed by the Claude Code CLI the SDK runs
@@ -86,8 +89,6 @@ import re
 import subprocess
 import sys
 import time
-import urllib.error
-import urllib.request
 import uuid
 
 import anyio
@@ -407,22 +408,22 @@ def issue_already_links_pr(repo: str, issue: str, pr_url: str) -> bool:
     return False
 
 
-# Optional Prometheus pushgateway for per-run token/cost metrics. Unset by
-# default (no metrics) so the runtime is deployable without any metrics backend;
-# set PUSHGATEWAY_URL to enable (the reference deployment points it at an
-# in-cluster pushgateway via the workflow).
-PUSHGATEWAY_URL = os.environ.get("PUSHGATEWAY_URL", "")
-
-
 class UsageTracker:
-    """Accumulates token/cost/turn totals across TurnUsage records and pushes
-    them to the pushgateway after every turn, so a hard kill still leaves the
-    latest numbers behind. Push failures are non-fatal — metrics must never
-    break the agent.
+    """Accumulates token/cost/turn totals across TurnUsage records for the
+    Actions job summary.
 
-    Metric names keep the `claude_agent_` prefix even though the backend is
-    now provider-agnostic: renaming would orphan the existing Grafana series.
-    Rename (with dashboard updates) as a deliberate follow-up, not in passing."""
+    This does NOT emit metrics. Usage telemetry comes from Claude Code's native
+    OpenTelemetry exporter, which the SDK inherits from this process's env (it
+    spawns the `claude` CLI with os.environ) — so an agent run reports the same
+    `claude_code.*` metrics as an interactive session, distinguished by
+    `app.entrypoint=sdk-py`. Configure it with CLAUDE_CODE_ENABLE_TELEMETRY and
+    the OTEL_* vars; there is nothing to do here.
+
+    The previous implementation PUT per-issue gauges to a Prometheus
+    pushgateway. That was removed: pushgateway series are flat gauges named
+    `_total`, so `increase()` over them returned nonsense, a resumed issue
+    overwrote its own earlier totals, and every gateway restart relabelled the
+    series and silently zeroed a week of reporting."""
 
     _TOKEN_KEYS = (
         "input_tokens",
@@ -443,32 +444,6 @@ class UsageTracker:
             self.tokens[key] += getattr(usage, key)
         self.cost_usd += usage.cost_usd
         self.num_turns += usage.num_turns
-        self.push()
-
-    def push(self) -> None:
-        if not PUSHGATEWAY_URL:
-            return  # metrics disabled (no pushgateway configured)
-        labels = f'{{model="{self.model}"}}'
-        lines = [
-            f'claude_agent_tokens_total{{model="{self.model}",type="{k}"}} {v}'
-            for k, v in self.tokens.items()
-        ]
-        lines.append(f"claude_agent_cost_usd_total{labels} {self.cost_usd}")
-        lines.append(f"claude_agent_turns_total{labels} {self.num_turns}")
-        body = "\n".join(lines) + "\n"
-        url = f"{PUSHGATEWAY_URL}/metrics/job/issue-agent/issue/{self.issue}"
-        # S310: the URL scheme comes from PUSHGATEWAY_URL (cluster config),
-        # always http(s) — never file: or a custom scheme.
-        req = urllib.request.Request(  # noqa: S310
-            url,
-            data=body.encode(),
-            method="PUT",
-            headers={"Content-Type": "text/plain"},
-        )
-        try:
-            urllib.request.urlopen(req, timeout=5).close()  # noqa: S310
-        except (urllib.error.URLError, OSError) as exc:
-            print(f"pushgateway push failed (non-fatal): {exc}", file=sys.stderr)
 
     def write_job_summary(self, status: str = "completed") -> None:
         path = os.environ.get("GITHUB_STEP_SUMMARY")
