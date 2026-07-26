@@ -1,23 +1,89 @@
 # Managed by `agent issue enable`. Thin caller of the shared reusable workflow —
 # put logic changes in the reusable workflow, not here.
 #
-# One-shot verification review (opt-OUT): the agent reviews every non-draft PR
-# and posts ONE review comment, UNLESS the PR carries an `auto-merge` label. Never
-# approves/blocks; a human still merges. `labeled`/`unlabeled` are included so
-# adding or removing `auto-merge` re-evaluates; `synchronize` is deliberately NOT
-# (one review on open, not one per push). The generic review prompt lives in the
-# reusable workflow; override it there or per-repo via .claude/ if needed.
+# Triggered by the COMPLETION of the pre-commit workflow, not by `pull_request`
+# directly. That is deliberate and load-bearing:
+#
+#   * A fork `pull_request` run receives NO repository secrets (only a read-only
+#     GITHUB_TOKEN), because the workflow file it runs comes from the PR's merge
+#     commit — i.e. the contributor can edit it. Approving a run permits it to
+#     burn compute; it does not, and cannot, unlock secrets. So a review called
+#     straight from `pull_request` has no CLAUDE_CODE_OAUTH_TOKEN on exactly the
+#     PRs that most need reviewing.
+#   * `workflow_run` runs in the BASE repo context: this file comes from the
+#     default branch (a fork cannot change it), secrets are available, and no
+#     fork code is checked out unless explicitly asked for.
+#
+# The maintainer's approval gate cascades for free: an unapproved fork run never
+# completes, so this workflow never fires. One click still governs everything.
+# Keep "Require approval for all outside collaborators" enabled (Settings ->
+# Actions -> General) — that setting is the actual gate.
+#
+# Cost of the design: review runs after CI rather than beside it. The parallel
+# alternative is `pull_request_target`, which is NOT subject to the fork-approval
+# setting and would fire automatically on every fork PR — it would bypass the
+# gate entirely. Sequential is the price of the gate; do not "optimise" this.
 name: PR review
 
 on:
-  pull_request:
-    types: [opened, reopened, ready_for_review, labeled, unlabeled]
+  workflow_run:
+    workflows: ["pre-commit"]
+    types: [completed]
 
 concurrency:
-  group: pr-review-${{ github.event.pull_request.number }}
+  group: pr-review-${{ github.event.workflow_run.head_sha }}
   cancel-in-progress: true
 
+permissions: {}
+
 jobs:
+  # Resolve the PR number from the head SHA in the trusted webhook payload.
+  #
+  # Two things NOT to do here. `github.event.workflow_run.pull_requests[]` is
+  # empty for fork PRs (long-standing behaviour), so it cannot be used. And the
+  # number must never be read from an artifact produced by the triggering run:
+  # that run is the untrusted one, so an attacker could name someone else's PR
+  # and aim the reviewer at an unrelated thread. `head_sha` comes from GitHub.
+  resolve:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      number: ${{ steps.pr.outputs.number }}
+    steps:
+      - name: Resolve PR from head SHA
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          # Preferred: commits/{sha}/pulls. A fork PR head is reachable in the
+          # base repo via refs/pull/N/head, so this resolves those too.
+          n="$(gh api "repos/${REPO}/commits/${SHA}/pulls" \
+                 --jq '[.[] | select(.state=="open")][0].number // empty' 2>/dev/null || true)"
+          if [[ -z "${n}" ]]; then
+            # Fallback for the cases that endpoint misses.
+            n="$(gh api "repos/${REPO}/pulls?state=open&per_page=100" \
+                   --jq --arg s "${SHA}" '[.[] | select(.head.sha==$s)][0].number // empty' \
+                   2>/dev/null || true)"
+          fi
+          if [[ -z "${n}" ]]; then
+            echo "no open PR for ${SHA}; nothing to review"
+          else
+            echo "resolved PR #${n} for ${SHA}"
+          fi
+          printf 'number=%s\n' "${n}" >> "$GITHUB_OUTPUT"
+
   review:
+    needs: resolve
+    if: needs.resolve.outputs.number != ''
     uses: "{reusable_repo}/.github/workflows/pr-review.reusable.yml@{ref}"
+    with:
+      pr_number: ${{ needs.resolve.outputs.number }}
+      head_sha: ${{ github.event.workflow_run.head_sha }}
     secrets: inherit
