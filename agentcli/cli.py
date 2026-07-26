@@ -5,6 +5,7 @@ import typer
 from agentcli import (
     credential,
     doctor,
+    ghpass,
     github,
     hooks,
     install,
@@ -238,6 +239,29 @@ def lab_command(ctx: typer.Context) -> None:
         raise typer.Exit(install.run(repo))
 
     labpass.exec_lab(args)
+
+
+# Same passthrough shape as `lab`: a sub-app would try to resolve `agent gh pr
+# view` as a subcommand named `pr` and fail before the passthrough ran.
+# Everything after `gh` is forwarded verbatim, so gh (not Typer) owns the flag
+# grammar -- `agent gh pr view 1337 --json title` reaches gh intact.
+@app.command(
+    "gh",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True},
+    help="Run the GitHub CLI with agent credentials: agent gh <args...>",
+)
+def gh_command(ctx: typer.Context) -> None:
+    """Run `gh` authenticated as brujoand-agent, with GH_TOKEN already minted.
+
+    `agent gh pr view 1337` is `gh pr view 1337` with a fresh App token in the
+    environment, so agents no longer prefix every call with
+    `GH_TOKEN=$(agent github token)` and clutter their logs.
+    """
+    try:
+        ghpass.exec_gh(list(ctx.args))
+    except AgentError as err:
+        print(f"ERROR: {err}")
+        raise typer.Exit(1) from err
 
 
 @workspace_app.command("create")
