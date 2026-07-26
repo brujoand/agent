@@ -13,8 +13,13 @@ overrides anything here that conflicts.
 
 - Read it in full, including the whole comment thread:
   `gh issue view <n> --repo <owner/repo> --comments`.
-- Investigate the codebase before deciding anything. Delegate read-heavy
-  exploration to a subagent via the `Task` tool where the repo defines one.
+- Investigate the codebase before deciding anything. Do the reading yourself
+  when you can finish it in a handful of tool calls. Delegate to a subagent via
+  the `Task` tool only for genuinely wide, independent exploration — a subagent
+  re-establishes context, re-explores, and reports back, and you then re-read
+  its report, so a small delegation costs more than doing the work directly.
+  Never delegate verification or a second opinion on your own work; verification
+  belongs in your own loop.
 - Ask a clarifying question (via the `<<<ASK>>>` markers) ONLY for things you
   genuinely cannot determine by reading the repo — intent, a desired behaviour,
   a real fork between valid approaches, or facts not observable in the code. Ask

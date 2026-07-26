@@ -47,6 +47,16 @@ PRICES: dict[str, tuple[float, float]] = {
 }
 PRICES_AS_OF = "2026-07-25"
 
+# Fast mode (`/fast`) runs the same model at a premium, and the transcript records
+# it per turn as `usage.speed == "fast"`. Without this the report prices those
+# turns at the standard rate and under-states them 2x -- silently, on exactly the
+# turns you would most want to see. Opus-tier only: a tier absent here falls back
+# to its standard price, because a missing entry means "fast mode does not exist
+# on this tier", not "this traffic is free".
+FAST_PRICES: dict[str, tuple[float, float]] = {
+    "opus": (10.0, 50.0),
+}
+
 # Cache multipliers on the tier's input price. A 5-minute write costs 1.25x and a
 # read 0.1x; the 1h-TTL write (2x) is not distinguishable in the transcript, so
 # writes are priced at the 5-minute rate and a 1h-heavy workload reads low.
@@ -79,6 +89,10 @@ class Turn:
     output_tokens: int
     cache_write: int
     cache_read: int
+    # `usage.speed` as the transcript reported it: "standard" or "fast". Defaulted
+    # so a turn constructed without it prices as standard, which is what every
+    # pre-fast-mode transcript means.
+    speed: str = "standard"
 
     @property
     def context(self) -> int:
@@ -88,7 +102,10 @@ class Turn:
     @property
     def cost(self) -> float:
         """API-list-equivalent dollars. Zero for a tier we have no price for."""
-        price = PRICES.get(tier(self.model))
+        key = tier(self.model)
+        price = FAST_PRICES.get(key) if self.speed == "fast" else None
+        if price is None:
+            price = PRICES.get(key)
         if price is None:
             return 0.0
         per_input, per_output = price
@@ -194,6 +211,7 @@ def _read_session(path: Path, cutoff: str):
                 output_tokens=_count(usage, "output_tokens"),
                 cache_write=_count(usage, "cache_creation_input_tokens"),
                 cache_read=_count(usage, "cache_read_input_tokens"),
+                speed=str(usage.get("speed") or "standard"),
             )
 
 

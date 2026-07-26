@@ -122,7 +122,7 @@ Runtime env / reusable-workflow inputs (all optional unless noted):
 |---|---|---|
 | `bot_login` / `AGENT_BOT_LOGIN` | *(auto-detected by `enable`)* | the App's login; how the agent recognizes its own comments |
 | `runner` | `ubuntu-latest` | `runs-on` label for the jobs |
-| `model` / `AGENT_MODEL` | `claude-opus-4-8` | model id passed to the provider |
+| `model` / `AGENT_MODEL` | `claude-opus-5` | model id passed to the provider |
 | `session_store_endpoint`/`_bucket` + `AWS_*` | *(empty → stateless)* | MinIO/S3 for transcript persistence + cross-timeout resume |
 | `otlp_metrics_endpoint` | *(empty → off)* | OTLP base URL for usage telemetry. The SDK spawns the `claude` CLI with this process's env, so the CLI's own OpenTelemetry exporter reports `claude_code.*` metrics tagged `app.entrypoint=sdk-py` — the same series an interactive session produces. A Prometheus OTLP receiver requires cumulative temporality; the workflow sets it. |
 | `AGENT_BASE_BRANCH` | *(repo default branch)* | PR base branch |

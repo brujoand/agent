@@ -125,7 +125,7 @@ def test_run_done_on_first_turn(monkeypatch):
     assert code == 0
     # The provider got a neutral SessionConfig with the AGENT_MODEL default.
     assert provider.config == SessionConfig(
-        model="claude-opus-4-8",
+        model="claude-opus-5",
         cwd=provider.config.cwd,
         session_id=agent.session_id_for("brujoand/gitops-homelab", "42"),
         resume=False,
