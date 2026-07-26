@@ -67,6 +67,22 @@ def test_pr_review_caller_is_triggered_by_workflow_run_not_pull_request():
     assert "download-artifact" not in yaml_only
 
 
+def _stub_repo_read(monkeypatch, *, private: bool = False) -> None:
+    """Stub the `GET /repos/{repo}` that `run` makes through `is_public`.
+
+    Every `run` test needs this. Without it the call reaches the real GitHub API:
+    the four tests below did exactly that for months, passing on any machine with
+    App credentials to hand and failing only on CI, where the error named the
+    missing credentials rather than the missing stub. `default_branch` is here
+    because `_default_branch` reads the same payload.
+    """
+    monkeypatch.setattr(
+        github,
+        "api_get",
+        lambda path, **kw: _Resp(200, {"private": private, "default_branch": "main"}),
+    )
+
+
 def test_is_public_reads_the_private_flag(monkeypatch):
     monkeypatch.setattr(github, "api_get", lambda path, **kw: _Resp(200, {"private": False}))
     assert issue_enable.is_public("brujoand/waiting-games") is True
@@ -148,6 +164,7 @@ def test_run_refuses_when_not_installed(monkeypatch):
 def test_run_dry_run_writes_nothing(monkeypatch, capsys):
     monkeypatch.setattr(issue_enable, "installed_slugs", lambda: {"brujoand/waiting-games"})
     monkeypatch.setattr(github, "app_slug", lambda: "my-agent")
+    _stub_repo_read(monkeypatch)
     # Any write attempt in dry-run is a bug.
     monkeypatch.setattr(github, "api_post", lambda *a, **k: pytest.fail("dry-run must not POST"))
     monkeypatch.setattr(github, "api_put", lambda *a, **k: pytest.fail("dry-run must not PUT"))
@@ -173,6 +190,7 @@ def test_run_dry_run_writes_nothing(monkeypatch, capsys):
 def test_run_honours_reusable_repo_override(monkeypatch, capsys):
     monkeypatch.setattr(issue_enable, "installed_slugs", lambda: {"brujoand/waiting-games"})
     monkeypatch.setattr(github, "app_slug", lambda: "my-agent")
+    _stub_repo_read(monkeypatch)
 
     issue_enable.run("brujoand/waiting-games", reusable_repo="myorg/agent", apply=False)
     out = capsys.readouterr().out
@@ -183,6 +201,7 @@ def test_run_honours_reusable_repo_override(monkeypatch, capsys):
 def test_run_apply_creates_labels(monkeypatch, capsys):
     monkeypatch.setattr(issue_enable, "installed_slugs", lambda: {"brujoand/waiting-games"})
     monkeypatch.setattr(github, "app_slug", lambda: "my-agent")
+    _stub_repo_read(monkeypatch)
     posted: list[str] = []
 
     def fake_post(path, body):
@@ -203,6 +222,7 @@ def test_run_apply_creates_labels(monkeypatch, capsys):
 def test_run_apply_open_pr_uses_pr_flow(monkeypatch, capsys):
     monkeypatch.setattr(issue_enable, "installed_slugs", lambda: {"brujoand/waiting-games"})
     monkeypatch.setattr(github, "app_slug", lambda: "my-agent")
+    _stub_repo_read(monkeypatch)
     monkeypatch.setattr(github, "api_post", lambda path, body: _Resp(201))
     called = {}
 
