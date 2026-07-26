@@ -138,6 +138,7 @@ repo's `CLAUDE.md` and `.claude/`.
 |---|---|
 | `agent issue enable owner/repo [--apply] [--open-pr] [--reusable-repo] [--ref]` | enable the agent on a repo |
 | `agent github token [--refresh]` | print a short-lived App installation token |
+| `agent gh <args...>` | run the GitHub CLI with GH_TOKEN already minted |
 | `agent git-credential get` | git credential helper (mints a token on demand) |
 | `agent repos` | HTTPS clone URLs the App installation can reach |
 | `agent setup rulesets --repo owner/repo [--apply]` | converge branch protection (human-only) |
