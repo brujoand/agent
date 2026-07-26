@@ -53,6 +53,12 @@
 # it ports exactly as cleanly as the admin role. An earlier version of this file
 # claimed the opposite and kept Renovate out of the shared definition; that was
 # wrong, and it made every fleet-wide apply a silent revocation.
+#
+# Naming that actor has a PRECONDITION: GitHub rejects a bypass actor for an App
+# that is not installed on the repo, with a bare 422. So onboarding installs
+# Renovate before it writes the ruleset -- the install is not an extra feature,
+# it is what makes the ruleset valid. RENOVATE_INSTALLATION_ID and
+# RENOVATE_BYPASS_APP_ID are therefore a pair: supply both or neither.
 
 set -euo pipefail
 
@@ -103,6 +109,14 @@ readonly AGENT_SECRET_NAME="CLAUDE_CODE_OAUTH_TOKEN"
 # step is skipped, exactly like the Actions secret above.
 #   RELEASE_BUMP_WEBHOOK_URL     e.g. https://<receiver-host>/hook/release-bump
 #   RELEASE_BUMP_WEBHOOK_SECRET  the HMAC secret the receiver verifies against
+#
+# Renovate, likewise from the environment and likewise a pair:
+#   RENOVATE_BYPASS_APP_ID       Renovate's APP id, named as a ruleset bypass
+#                                actor so its automerge survives the write
+#   RENOVATE_INSTALLATION_ID     its INSTALLATION id, used to add this repo to
+#                                the installation -- which is what makes that
+#                                bypass actor legal, and what lets Renovate read
+#                                the repo's private GHCR packages
 
 function usage {
   cat >&2 <<EOF
@@ -156,6 +170,38 @@ function app_remove {
   report "app" "removed"
 }
 
+# renovate_install adds the repo to the Renovate App's installation. Two things
+# depend on it, and both fail obscurely without it:
+#
+#   1. The ruleset below names Renovate as a bypass actor, and GitHub rejects a
+#      bypass actor for an App that is not installed on the repo -- a bare 422
+#      with no hint as to which field is at fault. So this must run FIRST.
+#   2. Renovate can only read a private GHCR package whose owning repo is inside
+#      its installation. Without this, `packages: read` on the App is not enough
+#      and the package silently resolves to "no-result".
+#
+# Same shape as app_install: the id addresses an installation, and the PAT is
+# what authorises the write.
+function renovate_install {
+  local rid="$1"
+  if [[ -z ${RENOVATE_INSTALLATION_ID:-} ]]; then
+    report "renovate" "skipped (RENOVATE_INSTALLATION_ID not in env)"
+    return 0
+  fi
+  gh api -X PUT "user/installations/${RENOVATE_INSTALLATION_ID}/repositories/${rid}" >/dev/null
+  report "renovate" "installed"
+}
+
+function renovate_remove {
+  local rid="$1"
+  if [[ -z ${RENOVATE_INSTALLATION_ID:-} ]]; then
+    report "renovate" "skipped (RENOVATE_INSTALLATION_ID not in env)"
+    return 0
+  fi
+  gh api -X DELETE "user/installations/${RENOVATE_INSTALLATION_ID}/repositories/${rid}" >/dev/null
+  report "renovate" "removed"
+}
+
 # ruleset_id echoes the id of the repo's ruleset named RULESET_NAME, or empty.
 function ruleset_id {
   local slug="$1"
@@ -199,12 +245,33 @@ function ruleset_apply {
   doc="$(ruleset_document)" || return 1
   id="$(ruleset_id "$slug")"
   if [[ -z $id ]]; then
-    gh api -X POST "repos/${slug}/rulesets" --input - <<<"${doc}" >/dev/null
+    ruleset_write POST "repos/${slug}/rulesets" "$doc" || return 1
     report "ruleset" "created  ${RULESET_NAME}"
   else
-    gh api -X PUT "repos/${slug}/rulesets/${id}" --input - <<<"${doc}" >/dev/null
+    ruleset_write PUT "repos/${slug}/rulesets/${id}" "$doc" || return 1
     report "ruleset" "updated  ${RULESET_NAME}"
   fi
+}
+
+# ruleset_write is ruleset_apply's one API call, wrapped so a 422 explains
+# itself. GitHub returns a bare "Validation Failed" for a bypass actor naming an
+# App that is not installed on the repo -- no field, no actor, nothing to search
+# for. That is the likeliest way this call fails, so say so rather than let the
+# operator rediscover it.
+function ruleset_write {
+  local method="$1" path="$2" doc="$3" out
+  if out="$(gh api -X "$method" "$path" --input - <<<"$doc" 2>&1)"; then
+    return 0
+  fi
+  echo "${out}" >&2
+  if [[ ${out} == *"Validation Failed"* || ${out} == *"422"* ]]; then
+    echo "onboard.sh: the ruleset was rejected. The usual cause is a bypass actor" >&2
+    echo "  naming a GitHub App that is not installed on this repo -- GitHub reports" >&2
+    echo "  that as a bare 422. Check that every Integration actor in" >&2
+    echo "  ${RULESET_FILE##*/} is installed here (RENOVATE_INSTALLATION_ID covers" >&2
+    echo "  Renovate), and that each actor_id is an App id, not an installation id." >&2
+  fi
+  return 1
 }
 
 function ruleset_remove {
@@ -359,9 +426,13 @@ function main {
     # every --remove so a detach never orphans a hook.
     ruleset_remove "$slug"
     webhook_remove "$slug"
+    renovate_remove "$rid"
     app_remove "$rid"
   else
     app_install "$rid"
+    # Before ruleset_apply, not after: the ruleset names Renovate as a bypass
+    # actor, which GitHub only accepts once Renovate is installed here.
+    renovate_install "$rid"
     ruleset_apply "$slug"
     fork_policy_harden "$slug"
     secret_set "$slug"

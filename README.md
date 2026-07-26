@@ -75,7 +75,7 @@ repo is private — granting it Actions access).
 Point callers at your own fork of this repo with `--reusable-repo owner/agent`
 (or `$AGENT_REUSABLE_REPO`).
 
-### `RENOVATE_BYPASS_APP_ID`
+### `RENOVATE_BYPASS_APP_ID` and `RENOVATE_INSTALLATION_ID`
 
 The `protect-main-pr-only` ruleset exempts two actors: the built-in Repository
 admin role, and — so its automerge survives — the Renovate App. An `Integration`
@@ -85,16 +85,32 @@ so that id is not committed: the definition carries `${RENOVATE_BYPASS_APP_ID}`
 and you supply it.
 
 ```bash
-export RENOVATE_BYPASS_APP_ID=<your Renovate App id>   # App settings -> "App ID"
-agent setup rulesets --repo owner/repo                 # dry-run; --apply to write
+export RENOVATE_BYPASS_APP_ID=<your Renovate App id>     # App settings -> "App ID"
+export RENOVATE_INSTALLATION_ID=<its installation id>    # /settings/installations/<id>
+agent setup rulesets --repo owner/repo                   # dry-run; --apply to write
 ./onboard.sh owner/repo
 ```
 
-Both consumers fail loudly when it is unset rather than dropping the actor. That
-matters: `bypass_actors` is replaced wholesale on write, so an omitted actor is
-not left alone — it is **revoked**. If you do not run Renovate, point the
-variable at whichever App you want exempt, or delete the entry from the
-definition.
+Both consumers fail loudly when the App id is unset rather than dropping the
+actor. That matters: `bypass_actors` is replaced wholesale on write, so an
+omitted actor is not left alone — it is **revoked**. If you do not run Renovate,
+point the variable at whichever App you want exempt, or delete the entry from
+the definition.
+
+**The two variables are a pair.** GitHub rejects a bypass actor naming an App
+that is not installed on the repo, and reports it as a bare
+`422 Validation Failed` with no indication of which field is at fault. So
+`onboard.sh` adds the repo to Renovate's installation *before* it writes the
+ruleset; `RENOVATE_INSTALLATION_ID` is what lets it. That install is a
+precondition for a valid ruleset, not an optional extra.
+
+It earns its keep twice over: `packages: read` on the Renovate App only reaches
+packages owned by repos inside its installation, so the same step is what lets
+Renovate resolve that repo's private GHCR images instead of silently returning
+`no-result`.
+
+Note `agent setup rulesets` writes the ruleset but installs nothing, so on a repo
+where Renovate is absent it hits the same 422. Onboard first.
 
 ## The `CLAUDE_CODE_OAUTH_TOKEN` secret (`onboard.sh`)
 
