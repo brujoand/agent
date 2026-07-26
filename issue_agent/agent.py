@@ -610,10 +610,10 @@ times out. Begin now: read the PR and the comment thread with
 
 
 async def run() -> int:
-    # The repo the agent OPERATES on. Prefer AGENT_TARGET_REPO: the central hub
-    # runs one workflow (in its own repo) against many other repos, and Actions
-    # RESETS the reserved GITHUB_REPOSITORY to the workflow's own repo on every
-    # step — so a step-level override of it is silently ignored. AGENT_TARGET_REPO
+    # The repo the agent OPERATES on. Prefer AGENT_TARGET_REPO, for a workflow that
+    # runs in one repo against another: Actions RESETS the reserved
+    # GITHUB_REPOSITORY to the workflow's own repo on every step — so a
+    # step-level override of it is silently ignored. AGENT_TARGET_REPO
     # is a normal env var Actions leaves alone. Falls back to GITHUB_REPOSITORY for
     # the ordinary same-repo workflows. (GITHUB_REPOSITORY still names the workflow
     # repo, which is what runner_context() wants for the run-log link.)

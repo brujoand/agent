@@ -171,8 +171,8 @@ def test_run_nudges_when_no_marker(monkeypatch):
 
 
 def test_agent_target_repo_overrides_github_repository(monkeypatch):
-    # The hub runs one workflow against many repos; AGENT_TARGET_REPO is what the
-    # agent must operate on, not the workflow's own GITHUB_REPOSITORY.
+    # For a workflow running in one repo against another, AGENT_TARGET_REPO is
+    # what the agent must operate on, not the workflow's own GITHUB_REPOSITORY.
     session = FakeSession([TurnResult(text="<<<DONE>>>", usage=TurnUsage(num_turns=1))])
     code, provider = run_loop(monkeypatch, session, [], target_repo="brujoand/tracktor")
     assert code == 0

@@ -18,8 +18,9 @@ class _Resp:
         return self._payload
 
 
-# Issues are handled by the central hub, so `enable` lays down only the per-repo
-# PR-review caller (+ labels + the pre-commit bundle).
+# `enable` wires PR review and nothing else, so the only caller it lays down is
+# the per-repo PR-review one (+ labels + the pre-commit bundle). No issue caller
+# is emitted and nothing dispatches issues centrally.
 _EXPECTED_CALLERS = {
     ".github/workflows/pr-review.yml",
 }
@@ -67,41 +68,39 @@ def test_pr_review_caller_is_triggered_by_workflow_run_not_pull_request():
     assert "download-artifact" not in yaml_only
 
 
-def _stub_repo_read(monkeypatch, *, private: bool = False) -> None:
-    """Stub the `GET /repos/{repo}` that `run` makes through `is_public`.
+def _stub_repo_read(monkeypatch) -> None:
+    """Stub the `GET /repos/{repo}` that `run` makes through `_default_branch`.
 
     Every `run` test needs this. Without it the call reaches the real GitHub API:
     the four tests below did exactly that for months, passing on any machine with
     App credentials to hand and failing only on CI, where the error named the
-    missing credentials rather than the missing stub. `default_branch` is here
-    because `_default_branch` reads the same payload.
+    missing credentials rather than the missing stub.
+
+    It used to serve `is_public` too, and carried a `private` flag for it. That
+    caller is gone — `enable` no longer branches on visibility — so the payload
+    is down to the one field still read.
     """
     monkeypatch.setattr(
         github,
         "api_get",
-        lambda path, **kw: _Resp(200, {"private": private, "default_branch": "main"}),
+        lambda path, **kw: _Resp(200, {"default_branch": "main"}),
     )
 
 
-def test_is_public_reads_the_private_flag(monkeypatch):
-    monkeypatch.setattr(github, "api_get", lambda path, **kw: _Resp(200, {"private": False}))
-    assert issue_enable.is_public("brujoand/waiting-games") is True
-    monkeypatch.setattr(github, "api_get", lambda path, **kw: _Resp(200, {"private": True}))
-    assert issue_enable.is_public("brujoand/something") is False
+def test_checklist_never_offers_issues(capsys):
+    """Issues are off everywhere, so the checklist must not imply otherwise.
 
-
-@pytest.mark.parametrize(
-    ("public", "expect", "forbid"),
-    [
-        (True, "deliberately NOT enabled", "just apply the `agent` label"),
-        (False, "just apply the `agent` label", "deliberately NOT enabled"),
-    ],
-)
-def test_checklist_offers_issues_only_on_private_repos(capsys, public, expect, forbid):
-    issue_enable._print_checklist("owner/repo", "myorg/agent", public)
+    The old text promised a central hub would pick up an `agent`-labelled issue.
+    Nothing does now, and a checklist that still said so would send the reader
+    off to label an issue that never gets read."""
+    issue_enable._print_checklist("owner/repo", "myorg/agent")
     out = capsys.readouterr().out
-    assert expect in out
-    assert forbid not in out
+    assert "ISSUES: not enabled here, on any repo" in out
+    # Neither half of the old promise survives. Match the phrases, not the bare
+    # word "hub" — that is a substring of "github-hosted" in the secrets step.
+    assert "central hub" not in out
+    assert "the hub ignores" not in out
+    assert "just apply the `agent` label" not in out
     # The fork-approval gate is listed for every repo, and listed first.
     assert "Require approval for all external contributors" in out
     assert out.index("Require approval") < out.index("CLAUDE_CODE_OAUTH_TOKEN")

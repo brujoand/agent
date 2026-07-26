@@ -182,8 +182,8 @@ def test_open_session_fresh_sets_session_id(monkeypatch):
 
 
 def test_issue_gets_cluster_tools_only_when_opted_in(monkeypatch):
-    # The cluster repo's own privileged workflow sets AGENT_CLUSTER_TOOLS=1; the
-    # hub (which never sets it) stays locked down.
+    # A deployment's own privileged workflow sets AGENT_CLUSTER_TOOLS=1; every
+    # other run, which never sets it, stays locked down.
     monkeypatch.setenv("AGENT_CLUSTER_TOOLS", "1")
     assert "Bash(kubectl:*)" in allowed_tools_for("issue")
     assert "Bash(curl:*)" in allowed_tools_for("issue")

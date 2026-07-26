@@ -144,8 +144,9 @@ def github_token(
 ) -> None:
     """Print a short-lived installation token. Only the token reaches stdout.
 
-    With --repo, the token is narrowed to that single repo (used by the hub so a
-    run cannot reach any other installed repo).
+    With --repo, the token is narrowed to that single repo, so a run cannot reach
+    any other repo the App is installed on. Use it whenever one workflow acts on
+    a repo other than its own.
     """
     repositories = [repo.rsplit("/", 1)[-1]] if repo else None
     print(github.token(force=refresh, repositories=repositories))
