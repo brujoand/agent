@@ -69,11 +69,29 @@ def test_drifts_ignores_server_populated_fields():
     assert not rulesets._drifts(live, desired)
 
 
-def test_drifts_ignores_unmanaged_bypass_actors():
-    """We never declare bypass_actors, so their presence must not read as drift."""
+def test_drifts_ignores_bypass_actors_a_definition_does_not_declare():
+    """A definition that omits bypass_actors does not manage them."""
     desired = {"name": "x", "enforcement": "active"}
     live = {"name": "x", "enforcement": "active", "bypass_actors": [{"actor_id": 5}]}
     assert not rulesets._drifts(live, desired)
+
+
+def test_drifts_detects_an_undeclared_bypass_actor_once_the_key_is_managed():
+    """The counterpart, and the reason Renovate must be declared.
+
+    The shipped definition DOES declare bypass_actors, so the declared set is the
+    whole set: an actor added by hand in the UI reads as drift and `--apply`
+    removes it. Renovate merges its own PRs via exactly such a bypass, so leaving
+    it undeclared means every fleet run silently revokes its automerge.
+    """
+    desired = {"bypass_actors": [{"actor_id": 5, "actor_type": "RepositoryRole"}]}
+    live = {
+        "bypass_actors": [
+            {"actor_id": 5, "actor_type": "RepositoryRole"},
+            {"actor_id": 999, "actor_type": "Integration"},
+        ]
+    }
+    assert rulesets._drifts(live, desired)
 
 
 def test_drifts_detects_a_changed_rule():
@@ -189,22 +207,70 @@ def test_dry_run_never_writes(monkeypatch, existing, detail, expected):
 # --- the shipped definition --------------------------------------------------
 
 
-def test_shipped_ruleset_exempts_only_the_admin_role():
-    """The one bypass actor is the built-in Repository admin role (id 5). It ports
-    cleanly across repos (a GitHub built-in, identical everywhere) and never
-    applies to brujoand-agent[bot], which is not an admin -- so the human account
-    owner can merge their own PRs (no self-approval on a solo account) while the
-    agent still cannot merge its own. Per-account user/Integration ids (e.g.
-    Renovate) are deliberately NOT declared: those do not port and could silently
-    grant a bypass to the wrong actor."""
+def test_shipped_ruleset_exempts_the_admin_role_and_renovate(monkeypatch):
+    """Two bypass actors, and neither is brujoand-agent[bot].
+
+    * Repository admin role (id 5), a GitHub built-in with the same id on every
+      repo. The account owner can merge their own PRs -- necessary on a solo
+      account, where self-approval is forbidden -- while the agent, not being an
+      admin, still cannot merge its own.
+    * The Renovate App, so its automerge keeps working. An Integration actor_id
+      is the APP id, which (unlike a user id or an installation id) is global,
+      so it ports across the fleet unchanged. `pull_request` mode, not `always`:
+      Renovate only ever merges through a PR, and direct pushes to the default
+      branch stay closed to it.
+
+    Declaring it is not optional. bypass_actors is compared as a whole list, so
+    an actor present live but absent here is revoked on the next `--apply`.
+    """
+    monkeypatch.setenv("RENOVATE_BYPASS_APP_ID", "424242")
     desired = rulesets.load("protect-main-pr-only")
     assert desired["name"] == "protect-main-pr-only"
     assert desired["bypass_actors"] == [
-        {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"}
+        {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "always"},
+        {"actor_id": 424242, "actor_type": "Integration", "bypass_mode": "pull_request"},
     ]
-    # nothing per-account: only built-in RepositoryRole actors may be declared.
-    assert all(a["actor_type"] == "RepositoryRole" for a in desired["bypass_actors"])
+    # The agent must never be able to bypass the ruleset that constrains it.
+    assert all(
+        a["bypass_mode"] != "always" or a["actor_type"] == "RepositoryRole"
+        for a in desired["bypass_actors"]
+    )
     assert {r["type"] for r in desired["rules"]} == {"deletion", "non_fast_forward", "pull_request"}
+
+
+def test_load_resolves_env_placeholders_as_ints(monkeypatch):
+    """actor_id must reach GitHub as a number, not the string it is in JSON."""
+    monkeypatch.setenv("RENOVATE_BYPASS_APP_ID", "987654")
+    desired = rulesets.load("protect-main-pr-only")
+    actor = next(a for a in desired["bypass_actors"] if a["actor_type"] == "Integration")
+    assert actor["actor_id"] == 987654
+    assert isinstance(actor["actor_id"], int)
+
+
+@pytest.mark.parametrize("value", ["", "   "])
+def test_load_refuses_to_silently_drop_an_unset_placeholder(monkeypatch, value):
+    """Unset must abort, never narrow the policy.
+
+    Omitting the actor would not be a no-op: it would PUT a shorter list and
+    revoke Renovate's bypass across the fleet.
+    """
+    monkeypatch.setenv("RENOVATE_BYPASS_APP_ID", value)
+    with pytest.raises(AgentError, match="RENOVATE_BYPASS_APP_ID"):
+        rulesets.load("protect-main-pr-only")
+
+
+def test_load_refuses_when_placeholder_is_absent_entirely(monkeypatch):
+    monkeypatch.delenv("RENOVATE_BYPASS_APP_ID", raising=False)
+    with pytest.raises(AgentError, match="unset or empty"):
+        rulesets.load("protect-main-pr-only")
+
+
+def test_no_account_specific_identity_is_committed_to_this_public_repo():
+    """This repo is public: the App id may only ever appear as a placeholder."""
+    raw = (rulesets._RULESET_DIR / "protect-main-pr-only.json").read_text()
+    for actor in json.loads(raw)["bypass_actors"]:
+        if actor["actor_type"] == "Integration":
+            assert actor["actor_id"] == "${RENOVATE_BYPASS_APP_ID}"
 
 
 def test_load_rejects_unknown_ruleset():

@@ -29,6 +29,8 @@ present. Naive POST-always would fail on every second run.
 from __future__ import annotations
 
 import json
+import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -39,6 +41,12 @@ from agentcli.errors import AgentAuthError, AgentError, AgentHTTPError
 # `ruleset_defs`, not `rulesets`: a data directory sharing this module's name
 # would shadow it as a package.
 _RULESET_DIR = Path(__file__).parent / "ruleset_defs"
+
+# A definition value that is exactly `${VAR}` is read from the environment at
+# load time. This repo is public, so account-specific identities -- App ids
+# above all -- may not be committed here; the definition ships the policy and
+# the operator's shell supplies the number.
+_ENV_REF = re.compile(r"^\$\{([A-Z][A-Z0-9_]*)\}$")
 
 
 def _gh(*args: str, check: bool = True) -> str:
@@ -90,11 +98,44 @@ def require_human_token() -> str:
     return login
 
 
+def _resolve(value, where: str):
+    """Substitute `${VAR}` placeholders from the environment, recursively.
+
+    Fails loudly on an unset variable rather than dropping the key. That choice
+    is load-bearing: `bypass_actors` is compared as a whole list (see `_covers`),
+    so a silently-omitted actor is not a no-op -- it is a PUT that REVOKES that
+    actor's bypass on every repo in the fleet. An unset variable must stop the
+    run, not quietly narrow the policy.
+
+    Digit strings become ints: GitHub rejects a string `actor_id`.
+    """
+    if isinstance(value, dict):
+        return {key: _resolve(item, f"{where}.{key}") for key, item in value.items()}
+    if isinstance(value, list):
+        return [_resolve(item, f"{where}[{index}]") for index, item in enumerate(value)]
+    if isinstance(value, str):
+        match = _ENV_REF.match(value)
+        if not match:
+            return value
+        name = match.group(1)
+        resolved = os.environ.get(name, "").strip()
+        if not resolved:
+            raise AgentError(
+                f"{where} needs ${{{name}}}, which is unset or empty.\n"
+                f"  This repo is public, so the value cannot live in the ruleset "
+                f"definition.\n"
+                f"  Export it for the command, e.g. {name}=<id> agent setup "
+                f"rulesets --apply"
+            )
+        return int(resolved) if resolved.isdigit() else resolved
+    return value
+
+
 def load(name: str) -> dict:
     path = _RULESET_DIR / f"{name}.json"
     if not path.is_file():
         raise AgentError(f"no such ruleset definition: {path}")
-    return json.loads(path.read_text())
+    return _resolve(json.loads(path.read_text()), name)
 
 
 def _find_by_name(slug: str, name: str) -> dict | None:
@@ -141,8 +182,13 @@ def apply_to(slug: str, desired: dict, dry_run: bool = True) -> str:
     """Converge one repo.
 
     Returns 'created' | 'updated' | 'unchanged', or the 'would ...' form under
-    dry_run. Never clears bypass_actors: the desired document omits that key, so
-    the API leaves existing actors untouched.
+    dry_run.
+
+    NOTE: bypass_actors IS declared and IS therefore enforced. `_covers` compares
+    lists by length and position, so any live actor missing from the definition
+    reads as drift and the PUT removes it. That is deliberate -- the declared set
+    is the whole set -- but it means an actor added by hand in the UI survives
+    only until the next `--apply`. Add it to the definition instead.
     """
     current = _find_by_name(slug, desired["name"])
     payload = json.dumps(desired)

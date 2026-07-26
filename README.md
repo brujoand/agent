@@ -75,6 +75,27 @@ repo is private — granting it Actions access).
 Point callers at your own fork of this repo with `--reusable-repo owner/agent`
 (or `$AGENT_REUSABLE_REPO`).
 
+### `RENOVATE_BYPASS_APP_ID`
+
+The `protect-main-pr-only` ruleset exempts two actors: the built-in Repository
+admin role, and — so its automerge survives — the Renovate App. An `Integration`
+bypass actor is identified by the **App id**, which is global to the App (unlike
+an installation id), so one value is correct on every repo. This repo is public,
+so that id is not committed: the definition carries `${RENOVATE_BYPASS_APP_ID}`
+and you supply it.
+
+```bash
+export RENOVATE_BYPASS_APP_ID=<your Renovate App id>   # App settings -> "App ID"
+agent setup rulesets --repo owner/repo                 # dry-run; --apply to write
+./onboard.sh owner/repo
+```
+
+Both consumers fail loudly when it is unset rather than dropping the actor. That
+matters: `bypass_actors` is replaced wholesale on write, so an omitted actor is
+not left alone — it is **revoked**. If you do not run Renovate, point the
+variable at whichever App you want exempt, or delete the entry from the
+definition.
+
 ## The `CLAUDE_CODE_OAUTH_TOKEN` secret (`onboard.sh`)
 
 The agent authenticates to Anthropic with a `CLAUDE_CODE_OAUTH_TOKEN` Actions
