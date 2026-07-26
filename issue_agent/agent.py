@@ -416,8 +416,17 @@ class UsageTracker:
     OpenTelemetry exporter, which the SDK inherits from this process's env (it
     spawns the `claude` CLI with os.environ) — so an agent run reports the same
     `claude_code.*` metrics as an interactive session, distinguished by
-    `app.entrypoint=sdk-py`. Configure it with CLAUDE_CODE_ENABLE_TELEMETRY and
+    `app.entrypoint=sdk-cli`. Configure it with CLAUDE_CODE_ENABLE_TELEMETRY and
     the OTEL_* vars; there is nothing to do here.
+
+    `sdk-cli`, not `sdk-py`: the label names the process that actually exports,
+    and that is the `claude` CLI this SDK spawns, whatever language drove it. This
+    docstring said `sdk-py` until a dashboard built on it matched nothing -- the
+    value does not exist in the metrics at all, so the mistake is invisible until
+    someone queries for it and reads the empty result as "the agent is free".
+    A CI run also carries no `host` label (the workflows set no
+    OTEL_RESOURCE_ATTRIBUTES), which is what separates it from an SDK run started
+    on the agent host.
 
     The previous implementation PUT per-issue gauges to a Prometheus
     pushgateway. That was removed: pushgateway series are flat gauges named
