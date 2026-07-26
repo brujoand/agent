@@ -22,10 +22,12 @@
 # becomes a deployed artifact needs no second onboarding pass. Like the Actions
 # secret, it is skipped when its env vars are unset.
 #
-# It refuses to run against the control repo (gitops-homelab): that repo manages
-# its own App access and protections from inside the cluster, and the SHARED
-# ruleset here omits its Renovate bypass actor -- applying it there would strip
-# Renovate's ability to merge. So it is never a valid target.
+# It refuses to run against the control repo: that repo manages its own App
+# access and protections from inside the cluster, so it is never a valid target.
+# (It used to also be unsafe -- the shared ruleset omitted Renovate's bypass and
+# applying it there stripped Renovate's ability to merge. The definition now
+# declares that actor, so the shared document is correct everywhere; only the
+# self-management argument remains.)
 #
 # What the human's PAT can and cannot do (all verified against the live API):
 #   * install the App on a repo:  PUT  /user/installations/{id}/repositories/{repo_id}
@@ -43,10 +45,14 @@
 # admin can still push directly. This does NOT weaken the constraint on the
 # agent: brujoand-agent[bot] is not an admin, so the exemption never applies to
 # it -- it still cannot merge its own PRs. Admin (id 5) is a GitHub built-in and
-# identical on every repo, so it ports cleanly. gitops-homelab additionally
-# exempts an Integration (Renovate) actor, but that id is per-installation and
-# does not port, so it is deliberately a gitops-homelab-only exception, not part
-# of the shared definition here.
+# identical on every repo, so it ports cleanly.
+#
+# It also exempts the Renovate App (Integration, pull_request mode) so Renovate's
+# automerge keeps working. An Integration actor_id is the APP id, not the
+# installation id -- global to the App and therefore identical on every repo, so
+# it ports exactly as cleanly as the admin role. An earlier version of this file
+# claimed the opposite and kept Renovate out of the shared definition; that was
+# wrong, and it made every fleet-wide apply a silent revocation.
 
 set -euo pipefail
 
@@ -157,16 +163,46 @@ function ruleset_id {
     --jq ".[] | select(.name == \"${RULESET_NAME}\") | .id" 2>/dev/null | head -1
 }
 
+# ruleset_document prints the ruleset with every `${VAR}` placeholder replaced by
+# that environment variable, mirroring agentcli/rulesets.py `_resolve` -- the two
+# consumers read the same file, so they must read it the same way.
+#
+# This repo is public, so an account-specific id (the Renovate App's) may not be
+# committed; the definition carries the policy and the operator supplies the
+# number. Digit strings become JSON numbers: GitHub rejects a string actor_id.
+#
+# An unset variable is fatal, never a silently omitted actor. bypass_actors is
+# replaced wholesale by the PUT below, so dropping one does not leave it alone --
+# it REVOKES it.
+function ruleset_document {
+  jq '
+    walk(
+      if type == "string" and test("^\\$\\{[A-Z][A-Z0-9_]*\\}$")
+      then
+        (ltrimstr("${") | rtrimstr("}")) as $name
+        | ((env[$name] // "") | gsub("^\\s+|\\s+$"; "")) as $value
+        | if $value == "" then
+            error("ruleset needs $\($name), which is unset or empty. Export it, e.g. \($name)=<id> ./onboard.sh ...")
+          elif ($value | test("^[0-9]+$")) then ($value | tonumber)
+          else $value
+          end
+      else .
+      end
+    )
+  ' "${RULESET_FILE}"
+}
+
 # ruleset_apply creates the ruleset if absent, else replaces it. GitHub 422s on a
 # duplicate name, so a blind POST would fail on re-run -- match by name first.
 function ruleset_apply {
-  local slug="$1" id
+  local slug="$1" id doc
+  doc="$(ruleset_document)" || return 1
   id="$(ruleset_id "$slug")"
   if [[ -z $id ]]; then
-    gh api -X POST "repos/${slug}/rulesets" --input "${RULESET_FILE}" >/dev/null
+    gh api -X POST "repos/${slug}/rulesets" --input - <<<"${doc}" >/dev/null
     report "ruleset" "created  ${RULESET_NAME}"
   else
-    gh api -X PUT "repos/${slug}/rulesets/${id}" --input "${RULESET_FILE}" >/dev/null
+    gh api -X PUT "repos/${slug}/rulesets/${id}" --input - <<<"${doc}" >/dev/null
     report "ruleset" "updated  ${RULESET_NAME}"
   fi
 }
