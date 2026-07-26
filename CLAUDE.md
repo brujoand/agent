@@ -25,7 +25,17 @@ job), but the convention holds.
 `workspace.py` (session worktrees), `pull.py` + `repos.py` (repo sync),
 `skills.py` (symlink shared Claude skills from `skills/` into `~/.claude/skills/`),
 `rules.py` (import the always-on rules in `rules/` into `~/.claude/CLAUDE.md`),
+`hooks.py` (link `hooks/` **and** wire them into `~/.claude/settings.json`),
+`settings.py` (converge the values in `settings/` into `~/.claude/settings.json`),
+`usage.py` (what drives Claude Code token spend, from the local transcripts),
 `install.py`, `doctor.py`, `creds.py`/`labpass.py`, `config.py`, `errors.py`.
+
+The four distribution trees — `skills/`, `rules/`, `hooks/`, `settings/` — all
+install idempotently, are re-runnable forever, and touch nothing they do not own.
+`hooks.py` and `settings.py` both write `~/.claude/settings.json`: hooks owns the
+`hooks` key, settings owns the declared value keys and **refuses** to declare
+`hooks`, so the two never contend. Add a new managed setting by adding a key to
+`settings/settings.json` — nothing else.
 
 `issue_agent/` is the interactive issue/PR agent, run as a flat script in its
 own `/opt/issue-agent` venv: `agent.py` (the wrapper: ASK/DONE marker flow,

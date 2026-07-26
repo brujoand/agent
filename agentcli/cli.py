@@ -14,6 +14,7 @@ from agentcli import (
     repos,
     rules,
     rulesets,
+    settings,
     skills,
     ssh,
     usage,
@@ -42,6 +43,9 @@ rules_app = typer.Typer(
 hooks_app = typer.Typer(
     name="hooks", help="Install the workspace's shared Claude hooks.", no_args_is_help=True
 )
+settings_app = typer.Typer(
+    name="settings", help="Apply the workspace's managed Claude settings.", no_args_is_help=True
+)
 setup_app = typer.Typer(
     name="setup",
     help="Human-only privileged setup. Refuses to run with agent credentials.",
@@ -57,6 +61,7 @@ app.add_typer(issue_app)
 app.add_typer(skills_app)
 app.add_typer(rules_app)
 app.add_typer(hooks_app)
+app.add_typer(settings_app)
 app.add_typer(setup_app)
 app.add_typer(access_app)
 
@@ -372,6 +377,40 @@ def hooks_list() -> None:
     print(f"\n{hooks.settings_file()}: wiring {hooks.settings_status()}")
 
 
+@settings_app.command("install")
+def settings_install() -> None:
+    """Apply the managed settings keys to ~/.claude/settings.json. Idempotent.
+
+    Only declared keys are touched; everything else in the file is left as found.
+    A key removed from the declaration is removed here too, so the declaration
+    converges in both directions rather than only adding.
+    """
+    try:
+        changes, path = settings.install()
+    except AgentError as err:
+        print(f"ERROR: {err}")
+        raise typer.Exit(1) from err
+    for change in changes:
+        print(f"  {change.key:<28} {change.outcome:<8} {change.detail}")
+    print(f"\nsettings: {len(changes)} key(s) -> {path}")
+
+
+@settings_app.command("list")
+def settings_list() -> None:
+    """List the managed settings keys and whether each is already applied."""
+    try:
+        changes = settings.plan()
+    except AgentError as err:
+        print(f"ERROR: {err}")
+        raise typer.Exit(1) from err
+    if not changes:
+        print(f"no settings declared in {settings.source_file()}")
+        return
+    for change in changes:
+        print(f"  {change.key:<28} {change.outcome:<8} {change.detail}")
+    print(f"\n{settings.settings_file()}: {settings.status()}")
+
+
 # One command for a fresh host. Each installer is idempotent and independent, so
 # this is only ever a convenience -- and it keeps every future distribution tree
 # reachable from one place instead of a growing list to remember.
@@ -391,6 +430,7 @@ def install_command(
         ("skills", lambda: f"{len(skills.install())} linked -> {skills.dest_dir()}"),
         ("rules", lambda: f"block {rules.install()[0]} in {rules.memory_file()}"),
         ("hooks", lambda: _install_hooks_summary()),
+        ("settings", lambda: _install_settings_summary()),
     ):
         try:
             print(f"  {label:<8} {run()}")
@@ -410,6 +450,13 @@ def install_command(
     print(f"\ninstall: {'all set' if not failures else f'{failures} step(s) failed'}")
     print("Start a new Claude session to pick up newly linked skills, rules, and hooks.")
     raise typer.Exit(1 if failures else 0)
+
+
+def _install_settings_summary() -> str:
+    changes, path = settings.install()
+    touched = [c for c in changes if c.outcome not in ("ok",)]
+    detail = ", ".join(f"{c.outcome} {c.key}" for c in touched) if touched else "already current"
+    return f"{len(changes)} key(s) in {path}: {detail}"
 
 
 def _install_hooks_summary() -> str:

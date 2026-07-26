@@ -1,0 +1,28 @@
+{
+  "_comment": [
+    "Claude Code settings this workspace manages centrally, applied by",
+    "`agent settings install` (and by `agent install`). Claude Code's own",
+    "settings.json schema -- whatever is valid there is valid here.",
+    "",
+    "Only the keys named here are touched. Everything else in the user's",
+    "settings.json is left exactly as found, including host-specific values that",
+    "must never be committed to a public repo.",
+    "",
+    "Removing a key from this file REMOVES it from the user's settings on the next",
+    "install: the keys we applied are recorded, so convergence works in both",
+    "directions rather than only adding.",
+    "",
+    "A string value may reference the environment as ${VAR}. If the variable is",
+    "unset the key is skipped and reported -- never written with the placeholder",
+    "left in. That is how a host-specific setting stays declarable here without",
+    "the value itself appearing in a public repo.",
+    "",
+    "`hooks` is refused on purpose: hooks/hooks.json owns that key, and two",
+    "installers writing one key would flap."
+  ],
+
+  "effortLevel": "high",
+
+  "autoCompactEnabled": true,
+  "autoCompactWindow": 250000
+}

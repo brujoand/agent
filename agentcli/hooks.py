@@ -29,7 +29,7 @@ import os
 from pathlib import Path
 from typing import Any
 
-from agentcli.config import repo_path
+from agentcli.config import claude_config_root, repo_path
 from agentcli.errors import AgentConfigError
 
 # The agent repo owns the shared hooks, for the same reason it owns the skills
@@ -48,8 +48,7 @@ def source_dir() -> Path:
 
 def config_root() -> Path:
     """The user's Claude config dir. Honors CLAUDE_CONFIG_DIR like Claude Code does."""
-    base = os.environ.get("CLAUDE_CONFIG_DIR")
-    return Path(base).expanduser() if base else Path.home() / ".claude"
+    return claude_config_root()
 
 
 def dest_dir() -> Path:

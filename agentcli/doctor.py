@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from agentcli import git, github, hooks, repos, rules, skills, workspace
+from agentcli import git, github, hooks, repos, rules, settings, skills, workspace
 from agentcli.config import DEFAULT_REPO, PRIVATE_ENV, repo_path, src_root
 from agentcli.creds import load_app_creds
 from agentcli.errors import AgentError
@@ -108,6 +108,12 @@ def _check_hooks() -> bool:
     return ok
 
 
+def _check_settings() -> bool:
+    ok, detail = settings.check()
+    _line(_OK if ok else _BAD, "settings", detail)
+    return ok
+
+
 def run() -> int:
     print(f"src root: {src_root()}\n")
     checks = [
@@ -119,6 +125,7 @@ def run() -> int:
         _check_skills,
         _check_rules,
         _check_hooks,
+        _check_settings,
     ]
     results = [check() for check in checks]
     print()

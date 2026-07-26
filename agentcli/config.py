@@ -69,6 +69,17 @@ def repo_path(repo: str) -> Path:
     return src_root() / repo
 
 
+def claude_config_root() -> Path:
+    """The user's Claude config dir. Honors CLAUDE_CONFIG_DIR like Claude Code does.
+
+    Lives here rather than in one installer because several of them now write
+    under it (hooks, skills, settings), and a second copy of this rule is a second
+    place for a moved CLAUDE_CONFIG_DIR to be missed.
+    """
+    base = os.environ.get("CLAUDE_CONFIG_DIR")
+    return Path(base).expanduser() if base else Path.home() / ".claude"
+
+
 def worktree_base(repo: str) -> Path:
     return Path.home() / "worktrees" / repo
 
