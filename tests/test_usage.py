@@ -65,6 +65,36 @@ def test_cost_is_zero_for_a_model_with_no_price_entry():
     assert turn.context == 1_000_000
 
 
+def test_fast_mode_turns_price_at_the_premium_rate():
+    standard = usage.Turn("2026-07-25", "agent", "claude-opus-5", 1_000_000, 1_000_000, 0, 0)
+    fast = usage.Turn(
+        "2026-07-25", "agent", "claude-opus-5", 1_000_000, 1_000_000, 0, 0, speed="fast"
+    )
+    assert standard.cost == pytest.approx(5.0 + 25.0)
+    # /fast is $10/$50 on opus -- exactly 2x, which is the whole reason to split it out.
+    assert fast.cost == pytest.approx(10.0 + 50.0)
+
+
+def test_fast_on_a_tier_without_a_fast_price_falls_back_to_standard():
+    # Absent from FAST_PRICES means "fast mode does not exist here", not "free".
+    turn = usage.Turn(
+        "2026-07-25", "agent", "claude-haiku-4-5", 1_000_000, 1_000_000, 0, 0, speed="fast"
+    )
+    assert turn.cost == pytest.approx(1.0 + 5.0)
+
+
+def test_speed_is_read_from_the_transcript(transcripts):
+    today = date.today().isoformat()
+    transcripts(
+        "-home-claude-src-agent",
+        "s",
+        [_turn(today, {"output_tokens": 1_000_000, "speed": "fast"}, model="claude-opus-5")],
+    )
+    turns, _ = usage.load_turns(days=30)
+    assert [t.speed for t in turns] == ["fast"]
+    assert turns[0].cost == pytest.approx(50.0)
+
+
 def test_load_turns_skips_lines_outside_the_window(transcripts):
     today = date.today().isoformat()
     old = (date.today() - timedelta(days=45)).isoformat()

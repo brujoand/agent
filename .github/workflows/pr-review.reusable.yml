@@ -24,7 +24,7 @@ on:
       model:
         type: string
         required: false
-        default: claude-opus-4-8
+        default: claude-opus-5
       runner:
         description: runs-on label for the review job.
         type: string

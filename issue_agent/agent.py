@@ -47,7 +47,7 @@ Environment:
   GITHUB_REPOSITORY    (required unless AGENT_TARGET_REPO set) owner/repo
   GITHUB_TOKEN         (required) for gh CLI (provided by Actions)
   AGENT_PROVIDER       (optional) default claude; selects the providers/ adapter
-  AGENT_MODEL          (optional) default claude-opus-4-8; passed through to the
+  AGENT_MODEL          (optional) default claude-opus-5; passed through to the
                        provider opaquely
   MAX_RUNTIME_SECONDS  (optional) default 2940 (49 min); exit cleanly before the
                        GitHub job timeout-minutes kills the pod.
@@ -630,8 +630,14 @@ async def run() -> int:
     # through to it opaquely. claude-model: manual bump per Claude release (no
     # Renovate datasource tracks Anthropic model IDs). Overridden by
     # AGENT_MODEL in the workflows.
+    #
+    # A bump is never JUST the string. Each release re-tunes behaviour, and the
+    # playbook is where that lands -- Opus 5 delegates to subagents far more
+    # readily than 4.8 did, so the 4.8-era "delegate exploration" nudge became a
+    # cost multiplier and had to be inverted in default-playbook.md. Read the
+    # target model's section of the `claude-api` migration guide before bumping.
     provider_name = env("AGENT_PROVIDER", "claude")
-    model = env("AGENT_MODEL", "claude-opus-4-8")
+    model = env("AGENT_MODEL", "claude-opus-5")
     max_runtime = int(env("MAX_RUNTIME_SECONDS", "2940"))
     poll_interval = int(env("POLL_INTERVAL_SECONDS", "20"))
     started = time.monotonic()
