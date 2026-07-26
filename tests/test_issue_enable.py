@@ -40,6 +40,57 @@ def test_caller_workflows_render_pr_review_only():
     assert "myorg/agent/.github/workflows/pr-review.reusable.yml@v1.2.3" in content
 
 
+def test_pr_review_caller_is_triggered_by_workflow_run_not_pull_request():
+    """Security regression guard.
+
+    A fork `pull_request` run receives no repository secrets, so a review called
+    from `pull_request` has no token on untrusted PRs. `workflow_run` runs in the
+    base-repo context (secrets available, workflow file not fork-editable) and
+    inherits the fork-approval gate, since unapproved CI never completes.
+    `pull_request_target` would restore parallelism but is NOT subject to that
+    gate — it must never appear here."""
+    content = issue_enable.caller_workflows("v1", "myorg/agent", "my-agent")[
+        ".github/workflows/pr-review.yml"
+    ]
+    # Assert on the YAML, not the prose: the header comment names the rejected
+    # triggers on purpose, to explain why they are wrong.
+    yaml_only = "\n".join(
+        line for line in content.splitlines() if not line.lstrip().startswith("#")
+    )
+    assert "workflow_run:" in yaml_only
+    assert "pull_request_target" not in yaml_only
+    trigger_block = yaml_only.split("jobs:", 1)[0]
+    assert "pull_request:" not in trigger_block
+    # The PR number must come from the trusted payload, never from an artifact
+    # written by the untrusted run (which could name someone else's PR).
+    assert "head_sha" in yaml_only
+    assert "download-artifact" not in yaml_only
+
+
+def test_is_public_reads_the_private_flag(monkeypatch):
+    monkeypatch.setattr(github, "api_get", lambda path, **kw: _Resp(200, {"private": False}))
+    assert issue_enable.is_public("brujoand/waiting-games") is True
+    monkeypatch.setattr(github, "api_get", lambda path, **kw: _Resp(200, {"private": True}))
+    assert issue_enable.is_public("brujoand/something") is False
+
+
+@pytest.mark.parametrize(
+    ("public", "expect", "forbid"),
+    [
+        (True, "deliberately NOT enabled", "just apply the `agent` label"),
+        (False, "just apply the `agent` label", "deliberately NOT enabled"),
+    ],
+)
+def test_checklist_offers_issues_only_on_private_repos(capsys, public, expect, forbid):
+    issue_enable._print_checklist("owner/repo", "myorg/agent", public)
+    out = capsys.readouterr().out
+    assert expect in out
+    assert forbid not in out
+    # The fork-approval gate is listed for every repo, and listed first.
+    assert "Require approval for all external contributors" in out
+    assert out.index("Require approval") < out.index("CLAUDE_CODE_OAUTH_TOKEN")
+
+
 def test_bundle_files_carry_baseline_and_denylist():
     files = issue_enable.bundle_files()
     assert set(files) == _EXPECTED_BUNDLE
