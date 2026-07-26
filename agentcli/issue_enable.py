@@ -1,19 +1,22 @@
 """Enable the agent on a repo the agent App can reach.
 
-Enabling a repo, in the hub model, means: create the labels + lay down the
-per-repo **PR-review** workflow + the pre-commit baseline. This runs WITH agent
-credentials (creating labels + opening the PR are the App's own job).
+Enabling a repo means: create the labels + lay down the per-repo **PR-review**
+workflow + the pre-commit baseline. This runs WITH agent credentials (creating
+labels + opening the PR are the App's own job).
 
-ISSUES are handled centrally and **only on private repos** — the hub poller in
-the maintainer's infra scans installed private repos for `agent`-labelled issues
-and runs the agent against them, so those repos need no issue workflow of their
-own, just the label. Public repos get no issue agent at all: an issue body or
-comment there is written by anyone, and nothing gates it the way the fork-
-approval setting gates a pull request.
+**This command enables PR review, not issues.** It lays down no issue workflow,
+and no longer assumes a central dispatcher supplies one — a repo enabled here
+reacts to pull requests and nothing else. The labels are still created, because
+they are the runtime's contract and cost nothing, but they are inert until a
+deployment adds an issue caller of its own.
 
-PR review does run on public repos, but only behind that gate, and on fork PRs
-the reviewer is given the pinned diff alone — no description, no comments, no
-linked issue. See agentcli/workflow_templates/pr-review.yml for why.
+That is a deliberate narrowing, not an omission. The issue agent acts on issue
+and comment text, and whether that text is trustworthy is a judgement about who
+can write it in a given deployment — so it belongs to whoever runs the agent,
+not to this tool. PR review needs no such judgement: it is gated on fork
+approval, and on a fork PR the reviewer is given the pinned diff alone — no
+description, no comments, no linked issue. See
+agentcli/workflow_templates/pr-review.yml for why.
 
 Two classes of step it CANNOT do — GitHub gates them behind permissions the App
 deliberately lacks — so it prints them as a human checklist instead: Actions
@@ -161,16 +164,6 @@ def _default_branch(repo: str) -> str:
     return _repo_meta(repo)["default_branch"]
 
 
-def is_public(repo: str) -> bool:
-    """Whether ``repo`` is world-readable.
-
-    Drives the ISSUES half of the checklist: the hub only runs the issue agent on
-    private repos, because an issue body or comment on a public repo is written
-    by anyone and — unlike a fork PR, which the fork-approval setting gates — no
-    approval stands between that text and the agent."""
-    return not _repo_meta(repo).get("private", True)
-
-
 def _branch_sha(repo: str, branch: str) -> str:
     resp = github.api_get(f"/repos/{repo}/git/ref/heads/{branch}")
     if resp.status_code != 200:
@@ -264,7 +257,7 @@ def open_enable_pr(
     return pr.json()["html_url"]
 
 
-def _print_checklist(repo: str, reusable_repo: str, is_public: bool) -> None:
+def _print_checklist(repo: str, reusable_repo: str) -> None:
     print("HUMAN-ONLY steps (the App cannot do these):")
     steps = [
         # First, because on a public repo it IS the security model: nothing runs
@@ -285,18 +278,12 @@ def _print_checklist(repo: str, reusable_repo: str, is_public: bool) -> None:
         "Optional: `pre-commit install` locally so the baseline (incl. the "
         "internal-infra denylist) also runs on your machine, not only in CI.",
     ]
-    if is_public:
-        steps.append(
-            "ISSUES: deliberately NOT enabled here. The agent does not act on "
-            "issues in public repos — issue and comment text is attacker-supplied "
-            "and, unlike a fork PR, no approval gates it. The `agent` label is "
-            "created for consistency but the hub ignores this repo."
-        )
-    else:
-        steps.append(
-            "For ISSUES: no per-repo setup — just apply the `agent` label. The "
-            f"central hub picks it up (confirm the App is installed on {repo})."
-        )
+    steps.append(
+        "ISSUES: not enabled here, on any repo. This command lays down PR review "
+        "only, and nothing else picks up an `agent`-labelled issue on your "
+        "behalf. The labels are created so a deployment that adds its own issue "
+        "caller has them, but on their own they do nothing."
+    )
     for i, line in enumerate(steps, 1):
         print(f"  {i}. {line}")
 
@@ -342,5 +329,5 @@ def run(
             print(content)
         print()
 
-    _print_checklist(repo, reusable_repo, is_public(repo))
+    _print_checklist(repo, reusable_repo)
     return 0
