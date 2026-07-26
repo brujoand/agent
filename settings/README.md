@@ -70,6 +70,50 @@ references.
 | `effortLevel` | `high` | Claude Code defaults to `xhigh`. Measured on this host, ~97% of output tokens are thinking — about 17% of total spend — and `high` is the documented recommended minimum for intelligence-sensitive work. Drop to `medium` per session for mechanical passes with `/effort`. |
 | `autoCompactEnabled` | `true` | Explicit, because `autoCompactWindow` means nothing without it. |
 | `autoCompactWindow` | `250000` | The big one. `agent usage` measured turns above 200k context at 45% of turns but **76% of all re-read tokens** — roughly half of total spend. On a 1M-context model nothing forces a reset, so sessions coast at 400–900k and every turn re-reads all of it. This caps the effective window. It is also the budget [`hooks/context-budget.sh`](../hooks/context-budget.sh) warns against, so the two agree by construction. |
+| `env.*` (telemetry) | see below | Claude Code's OpenTelemetry exporter, pointed at the workspace's Prometheus OTLP receiver. |
+
+## Telemetry
+
+The exporter block was hand-written into each workstation's `settings.json` until
+2026-07-26, and drifted exactly as unmanaged policy does: one workstation
+reported, the other never had the block at all, and the gap went unnoticed for a
+month because a missing exporter and a quiet week look identical downstream. It
+is declared here now so that "is telemetry on?" is answered by `agent settings
+list` on any host instead of by reading a file on that host.
+
+Three values are host-supplied, so nothing identifying the infrastructure is in
+this repo. Set them where the rest of this host's agent environment lives —
+`~/.bash_private`:
+
+| variable | example | notes |
+|---|---|---|
+| `AGENT_TELEMETRY_ENABLED` | `1` | The master switch, gated on purpose. Without it `CLAUDE_CODE_ENABLE_TELEMETRY` is skipped, so a host that supplies no endpoint does not get an exporter pointed at the OTel default of `localhost:4318`, retrying forever into nothing. |
+| `AGENT_OTLP_ENDPOINT` | `https://prometheus.example.com/api/v1/otlp` | The receiver's base URL. The write path must be exempt from any OIDC in front of it — OTLP exporters cannot do an interactive auth flow. |
+| `AGENT_TELEMETRY_HOST` | `workstation-1` | Becomes `host=` in `OTEL_RESOURCE_ATTRIBUTES`; how one workstation is told from another in a query. |
+
+Set all three or none. A partial set is visible in one command — `agent settings
+list` prints every skipped key and why — which is the property the old
+hand-maintained block did not have.
+
+Two fixed values are load-bearing and easy to lose if anyone re-types this block
+by hand:
+
+- `OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE=cumulative` — Prometheus's
+  OTLP receiver rejects delta temporality, which is the exporter's default. It
+  answers HTTP 500 and the client logs nothing useful, so the symptom is silence.
+- `OTEL_METRICS_INCLUDE_ENTRYPOINT=true` — supplies `app_entrypoint`, which is
+  the only thing separating an interactive session from CI in the dashboard.
+
+Takes effect for **new** sessions. Verify from a host that can read Prometheus:
+
+```bash
+lab prometheus query \
+  'sum by (host, app_entrypoint) (last_over_time(claude_code_session_count_total[7d]))'
+```
+
+Use a range selector, never a bare instant query — an instant query only sees
+series with a sample in the last five minutes, so it returns nothing once a
+session ends and reads as "telemetry is broken" when it is working.
 
 `hooks` is refused here on purpose: [`../hooks/hooks.json`](../hooks/hooks.json)
 owns that key, and two installers writing one key would flap. The refusal happens

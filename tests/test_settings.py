@@ -356,3 +356,30 @@ def test_shipped_declaration_carries_no_host_specific_values():
         stripped = settings._VAR.sub("", value)
         assert "://" not in stripped, f"{key}: a URL must come from the environment"
         assert not re.fullmatch(r"[\d.:]+", stripped), f"{key}: an address must come from the env"
+
+
+REAL_SETTINGS_README = Path(__file__).resolve().parent.parent / "settings" / "README.md"
+
+
+def test_every_host_supplied_variable_is_documented():
+    """A `${VAR}` nobody documents is a key that silently never applies.
+
+    That is not hypothetical: the telemetry block lived un-declared and
+    hand-copied per host, and the resulting gap went unnoticed for a month
+    because an exporter that was never configured looks exactly like a quiet
+    week. The mechanism reports a skipped key, but only someone who knows the
+    variable exists can act on the report -- so the README is the other half of
+    the mechanism, and this keeps the two from drifting apart.
+    """
+    declared = json.loads(REAL_DECLARATION.read_text())
+    readme = REAL_SETTINGS_README.read_text()
+
+    referenced = {
+        name
+        for key, value in settings.flatten(declared).items()
+        if not key.startswith("_") and isinstance(value, str)
+        for name in settings._VAR.findall(value)
+    }
+    assert referenced, "expected the declaration to use the ${VAR} seam"
+    for name in sorted(referenced):
+        assert name in readme, f"{name} is referenced by the declaration but undocumented"
