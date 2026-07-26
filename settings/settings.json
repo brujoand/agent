@@ -24,5 +24,17 @@
   "effortLevel": "high",
 
   "autoCompactEnabled": true,
-  "autoCompactWindow": 250000
+  "autoCompactWindow": 250000,
+
+  "env": {
+    "CLAUDE_CODE_ENABLE_TELEMETRY": "${AGENT_TELEMETRY_ENABLED}",
+    "OTEL_METRICS_EXPORTER": "otlp",
+    "OTEL_LOGS_EXPORTER": "none",
+    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
+    "OTEL_EXPORTER_OTLP_ENDPOINT": "${AGENT_OTLP_ENDPOINT}",
+    "OTEL_EXPORTER_OTLP_METRICS_TEMPORALITY_PREFERENCE": "cumulative",
+    "OTEL_METRICS_INCLUDE_ACCOUNT_UUID": "false",
+    "OTEL_METRICS_INCLUDE_ENTRYPOINT": "true",
+    "OTEL_RESOURCE_ATTRIBUTES": "host=${AGENT_TELEMETRY_HOST}"
+  }
 }
