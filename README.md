@@ -134,6 +134,38 @@ There is deliberately no cross-repo fan-out: a human token cannot enumerate wher
 the App is installed (GitHub only allows that with the App's own credentials —
 see the note in `onboard.sh`), and onboarding already names the repo.
 
+## Release → deploy bump (`onboard.sh`)
+
+A repo that publishes a container image can tell a deployment receiver about it
+directly, so the deploy PR opens as soon as the image exists instead of waiting
+for something to poll the registry. Onboarding hands the repo the two values its
+release workflow needs, as Actions secrets:
+
+```bash
+export RELEASE_BUMP_WEBHOOK_URL=https://receiver.example.com/hook/release-bump
+read -rs RELEASE_BUMP_WEBHOOK_SECRET && export RELEASE_BUMP_WEBHOOK_SECRET
+./onboard.sh owner/repo        # sets RELEASE_BUMP_URL + RELEASE_BUMP_SECRET
+```
+
+The workflow then POSTs `{app, tag, digest}` signed with HMAC-SHA256 in
+`X-Hub-Signature-256`, plus `X-Bump-Source: release`. Sending the digest means
+the receiver never has to read the registry back — which it cannot do for a
+private package anyway.
+
+**Why the repo calls instead of a webhook.** This started as a `registry_package`
+webhook that `onboard.sh` registered per repo. GitHub delivered two consecutive
+releases about 40 minutes late and in the wrong order, so the older tag was
+applied last and the deployment was rolled backwards. Webhook delivery is a queue
+you neither control nor can order. A step in the release job runs after the push
+it reports, retries on its own, and fails the release when it cannot deliver — so
+a missed bump is loud rather than silently stale. Onboarding deletes a leftover
+webhook on the way past, since a repo carrying both would bump twice.
+
+Both variables come from your environment and are never hardcoded here: this repo
+is public, and keeping them parametric also means a fork points at its own
+receiver. Set neither and the step is skipped; there is no half-configured state,
+because a URL without a key just produces signed bodies nobody accepts.
+
 ## Hygiene: the internal-infra denylist
 
 The bundle `enable` adds includes a `no-internal-infra` pre-commit hook (plus
