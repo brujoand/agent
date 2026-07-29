@@ -57,9 +57,12 @@ passes repo visibility into its prompt and asks for this explicitly.
 
 ## Task worktrees
 
-**The primary checkouts under `~/src` are read-only for agents.** This holds for
-*every* repo in the workspace, not just the ones with a `CLAUDE.md`. Every change
-lands via worktree → feature branch → PR:
+**Primary checkouts under `~/src` are read-only for agents, and a worktree is
+spent once its PR merges.** Every change lands via worktree → feature branch →
+PR: never in `~/src`, never on the default branch, and never on a branch whose PR
+has already merged — pushing does not reopen it, so the work lands nowhere while
+looking done. There is no trivial-one-liner exception. Read-only work in `~/src`
+is fine.
 
 ```bash
 cd "$(agent workspace create <type>/<slug> [--repo <name>])"   # prints only the path
@@ -71,49 +74,16 @@ up each repo's default branch (`main` or `master`) on its own — never assume.
 It also runs `mise trust`; new worktrees are untrusted and the mise-shimmed tools
 (`uv`, `shellcheck`, `shfmt`, `pre-commit`, `gh`) fail until trusted.
 
-Read-only work in `~/src` is fine. There is **no trivial-one-liner exception**:
-main/master is protected everywhere, so even a one-word fix needs a branch and a
-PR — and the branch belongs in a worktree, so the primary checkout stays clean on
-the default branch and parallel tasks never collide.
+Both halves are enforced, not advised, by `PreToolUse` hooks in `~/.claude/hooks/`:
+`require-worktree.sh` and `require-fresh-branch.sh`. They block the offending call
+and print the recovery commands, so the mechanics live there rather than here.
+Because merges are squashes, branch freshness is judged by PR state via `gh`, not
+by git ancestry. Overrides (human, rare) are `AGENT_ALLOW_PRIMARY_WRITE=1` and
+`AGENT_ALLOW_MERGED_BRANCH=1`; each hook has a `test-*.sh` beside it.
 
-This is enforced, not advised. `~/.claude/hooks/require-worktree.sh` is a
-`PreToolUse` hook (registered in `~/.claude/settings.json`) that blocks Edit /
-Write / NotebookEdit and mutating git (`commit`, `push`, `checkout -b`, `sed -i`,
-…) whose target resolves inside `~/src/<repo>`. It resolves `cd`, `git -C`, and
-literal paths, so it is not fooled by a subshell. Being conservative, it also
-blocks a harmless command that merely *mentions* such a path next to a git verb.
-
-- Override (human, rare): `AGENT_ALLOW_PRIMARY_WRITE=1`.
-- Self-test: `AGENT_ALLOW_PRIMARY_WRITE=1 ~/.claude/hooks/test-require-worktree.sh`.
-- GitHub-hosted runs (CI, the issue agent) already work in a fresh isolated
-  checkout on their own branch. They must **not** create worktrees, and the hook
-  never applies there — it lives in `~/.claude`, which CI does not load.
-
-## A worktree is spent once its PR merges
-
-**Never build on a branch whose PR is already merged.** Resuming an old worktree
-puts you on a branch that was merged days ago; commits made there go nowhere,
-because pushing does **not** reopen a merged PR. The work sits on a dead branch
-and looks done when it is not. A merged worktree is spent — delete it and cut a
-new one. Do not "just add one more commit".
-
-Merges here are **squash** merges, so the branch tip is *not* an ancestor of the
-default branch: plain git ancestry misses most merged branches (13 of the 16
-worktrees found on disk). The PR state is the only reliable signal.
-
-`~/.claude/hooks/require-fresh-branch.sh` (`PreToolUse`) enforces it: before any
-`git commit`/`push`/`cherry-pick`/`gh pr create` — and before any Edit/Write — it
-resolves the target worktree's branch and blocks if the branch is already merged
-or closed. It checks, cheapest first: a cached verdict (MERGED is terminal, so a
-hit costs nothing), then local ancestry (free, catches merge-commit merges), then
-GitHub via `gh`. Verdicts cache under `~/.claude/state/branch-status/`.
-
-- `gh`'s stored token is stale. The live one is `GH_TOKEN=$(agent github token)` —
-  the hook mints it itself.
-- Infra failures (offline, no token) **fail open** so a flaky network cannot wedge
-  a session; the local ancestry check still applies.
-- Override (human, rare): `AGENT_ALLOW_MERGED_BRANCH=1`.
-- Self-test: `AGENT_ALLOW_PRIMARY_WRITE=1 ~/.claude/hooks/test-require-fresh-branch.sh`.
+**GitHub-hosted runs** (CI, the issue agent) already work in a fresh isolated
+checkout on their own branch. They must **not** create worktrees — and the hooks
+never apply there, because they live in `~/.claude`, which CI does not load.
 
 ## Secrets: there is no 1Password here
 
