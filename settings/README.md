@@ -69,7 +69,7 @@ references.
 |---|---|---|
 | `effortLevel` | `high` | Claude Code defaults to `xhigh`. Measured on this host, ~97% of output tokens are thinking — about 17% of total spend — and `high` is the documented recommended minimum for intelligence-sensitive work. Drop to `medium` per session for mechanical passes with `/effort`. |
 | `autoCompactEnabled` | `true` | Explicit, because `autoCompactWindow` means nothing without it. |
-| `autoCompactWindow` | `250000` | The big one. `agent usage` measured turns above 200k context at 45% of turns but **76% of all re-read tokens** — roughly half of total spend. On a 1M-context model nothing forces a reset, so sessions coast at 400–900k and every turn re-reads all of it. This caps the effective window. It is also the budget [`hooks/context-budget.sh`](../hooks/context-budget.sh) warns against, so the two agree by construction. |
+| `autoCompactWindow` | `450000` | The big one. `agent usage` measured turns above 200k context at 45% of turns but **76% of all re-read tokens** — roughly half of total spend. On a 1M-context model nothing forces a reset, so sessions coast at 400–900k and every turn re-reads all of it. This caps the effective window. Raised from `250000` on 2026-07-29: at that setting real sessions compacted mid-task, and a compaction that lands before the work is done costs the summary *and* the re-read. It is also the budget [`hooks/context-budget.sh`](../hooks/context-budget.sh) warns against, so the two agree by construction — a test reads the hook's fallback and asserts it matches. |
 | `env.*` (telemetry) | see below | Claude Code's OpenTelemetry exporter, pointed at the workspace's Prometheus OTLP receiver. |
 
 ## Telemetry

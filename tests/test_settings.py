@@ -335,8 +335,12 @@ def test_shipped_declaration_is_valid_and_declares_the_cost_controls():
     assert declared["effortLevel"] in ("low", "medium", "high", "xhigh")
     assert declared["autoCompactEnabled"] is True
     # The hook's fallback budget and this window must agree, or the hook warns
-    # about a compaction threshold that is not the real one.
-    assert declared["autoCompactWindow"] == 250_000
+    # about a compaction threshold that is not the real one. Read the hook rather
+    # than restating the number here, so tuning the window is a one-line change.
+    hook = (REAL_DECLARATION.parent.parent / "hooks" / "context-budget.sh").read_text()
+    fallback = re.search(r"^readonly DEFAULT_BUDGET=(\d+)$", hook, re.MULTILINE)
+    assert fallback is not None
+    assert declared["autoCompactWindow"] == int(fallback.group(1))
     assert not set(declared) & set(settings.RESERVED_KEYS)
 
 

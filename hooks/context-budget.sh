@@ -31,9 +31,10 @@
 # <budget>` and touches no state.
 set -e
 
-# Only consulted when settings.json has no autoCompactWindow. 250k is the
-# standard 200k window plus headroom, not a tuned value -- tune the setting.
-readonly DEFAULT_BUDGET=250000
+# Only consulted when settings.json has no autoCompactWindow. Kept equal to the
+# window this workspace ships (settings/settings.json) so a host that has not run
+# `agent settings install` is warned against the number it is about to get.
+readonly DEFAULT_BUDGET=450000
 
 # Fractions of the budget that trigger each level. `warn` is early enough that
 # clearing still saves a meaningful number of turns; `high` means compaction is

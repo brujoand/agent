@@ -422,14 +422,14 @@ def test_budget_script_falls_back_to_the_default_window(tmp_path, settings):
     config = tmp_path / "cfg"
     config.mkdir()
     (config / "settings.json").write_text(settings)
-    path = _transcript(tmp_path, _usage_line(228_000))
+    path = _transcript(tmp_path, _usage_line(400_000))
 
     out = _budget_run(
         {"transcript_path": str(path), "session_id": "t"},
         env={"CLAUDE_CONFIG_DIR": str(config)},
     )
 
-    assert out.split() == ["high", "228000", "250000"]
+    assert out.split() == ["high", "400000", "450000"]
 
 
 def test_budget_script_emits_a_system_message_and_nothing_else(tmp_path):

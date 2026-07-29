@@ -65,7 +65,8 @@ warning lands *before* the compaction window, while the free option is still the
 one on the table.
 
 The budget is `autoCompactWindow` from `settings.json` — one number to tune, not
-two — falling back to 250k. `AGENT_CONTEXT_BUDGET` overrides it per session.
+two — falling back to 450k, the same window `settings/settings.json` ships.
+`AGENT_CONTEXT_BUDGET` overrides it per session.
 
 Warnings go out as a `systemMessage`, which reaches the human only. Nothing else
 may reach stdout: `UserPromptSubmit` stdout is injected into the model's context,
@@ -78,7 +79,7 @@ file. A missing, unreadable, or malformed transcript reports `none` rather than
 failing the prompt.
 
 ```bash
-printf '{"message":{"usage":{"cache_read_input_tokens":228000}}}\n' > /tmp/t.jsonl
+printf '{"message":{"usage":{"cache_read_input_tokens":400000}}}\n' > /tmp/t.jsonl
 echo '{"transcript_path":"/tmp/t.jsonl"}' | hooks/context-budget.sh --print
-# high 228000 250000     <- level, resident tokens, budget
+# high 400000 450000     <- level, resident tokens, budget
 ```
