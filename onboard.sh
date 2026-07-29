@@ -13,13 +13,12 @@
 # ruleset, (public repos only) require manual approval for external fork PRs so a
 # fork cannot reach CI -- and any agent secret wired into it -- unattended, set
 # the agent's CLAUDE_CODE_OAUTH_TOKEN Actions secret from your environment, and
-# set the release->bump receiver's URL + HMAC secret as Actions secrets so the
-# repo's own release workflow can call the receiver directly (see below).
+# set the token its release workflow dispatches the deploy bump with (see below).
 #
-# Those secrets go on EVERY onboarded repo, not just deployed ones: a repo with
-# no release workflow simply never reads them, and it means a repo that later
-# becomes a deployed artifact needs no second onboarding pass. Like the Actions
-# secret above, the step is skipped when its env vars are unset.
+# That token goes on EVERY onboarded repo, not just deployed ones: a repo with no
+# release workflow simply never reads it, and it means a repo that later becomes a
+# deployed artifact needs no second onboarding pass. Like the Actions secret
+# above, the step is skipped when its env var is unset.
 #
 # It refuses to run against the control repo: that repo manages its own App
 # access and protections from inside the cluster, so it is never a valid target.
@@ -90,38 +89,42 @@ readonly FORK_APPROVAL_POLICY="all_external_contributors"
 # Mint its value with `claude setup-token` and export it before onboarding.
 readonly AGENT_SECRET_NAME="CLAUDE_CODE_OAUTH_TOKEN"
 
-# The Actions secrets a release workflow reads to call the release->bump receiver.
-readonly BUMP_URL_SECRET="RELEASE_BUMP_URL"
-readonly BUMP_KEY_SECRET="RELEASE_BUMP_SECRET"
+# The Actions secret a release workflow dispatches the deploy bump with.
+readonly BUMP_TOKEN_SECRET="RELEASE_BUMP_TOKEN"
 
-# The release->bump call. When a repo publishes a container image, its release
-# workflow POSTs {app, tag, digest} to an in-cluster receiver, which HMAC-verifies
-# the body and runs `lab bump <app> <tag> --digest <digest>` to open the deploy PR
-# immediately -- rather than waiting for a registry poll. The digest travels in
-# the payload so the receiver never has to read the registry, which is blind to
-# PRIVATE packages.
+# The release->bump dispatch. When a repo publishes a container image, its
+# release workflow dispatches a workflow in the DEPLOYMENT repo, handing it the
+# tag and digest it just pushed; that workflow opens the deploy PR. Onboarding's
+# part is to give the repo the token it dispatches with.
 #
-# This USED to be a `registry_package` webhook on the repo, and the events are why
-# it no longer is: GitHub delivered two consecutive releases ~40 minutes late and
-# in the WRONG ORDER, so the receiver pinned the older tag last and opened a PR
-# rolling the deployment backwards. A webhook is fire-and-forget from a queue we
-# do not control and cannot order. The release workflow, by contrast, runs after
-# the push it is reporting, can retry, and fails the release when it cannot
-# deliver -- so a bump is either applied or visibly broken, never silently stale.
-# Onboarding therefore hands the repo the endpoint and the key, and the repo
-# calls; a leftover webhook from the old model is deleted on the way past.
+# Two designs died getting here, and both failure modes are worth stating because
+# they are not obvious:
 #
-# Both values come from the ENVIRONMENT, never hardcoded. This script is
-# public-bound, so the cluster's URL and shared secret must not live in it -- and
-# keeping them parametric also means a fork of this tool points at its own
-# receiver. If either is unset the step is skipped, exactly like the Actions
-# secret above: the receiver rejects anything it cannot verify, so half a pair is
-# worse than none.
-#   RELEASE_BUMP_WEBHOOK_URL     e.g. https://<receiver-host>/hook/release-bump
-#   RELEASE_BUMP_WEBHOOK_SECRET  the HMAC secret the receiver verifies against
-# They keep the _WEBHOOK_ names purely so the private wrapper that supplies them
-# needs no coordinated change; the Actions secrets they land in are named for
-# what they now are (see BUMP_URL_SECRET / BUMP_KEY_SECRET below).
+#   1. A `registry_package` webhook, which onboarding used to register on each
+#      repo. GitHub delivered two consecutive releases ~40 minutes late and in the
+#      WRONG ORDER, so the older tag was pinned last and the deployment rolled
+#      backwards. Delivery order is not something the receiving end can fix.
+#   2. The release workflow POSTing at the deployment side directly. That endpoint
+#      was reachable only from GitHub's `.hooks` egress CIDRs -- six of them --
+#      while a hosted runner egresses from `.actions`, ~7300 CIDRs with ZERO
+#      overlap. Every call would have been dropped at the firewall.
+#
+# Dispatching has neither problem: it is a call the release job makes itself, in
+# order, to api.github.com, so it needs no inbound path anywhere. That is the
+# general lesson, not a detail of one network -- an outbound call to a well-known
+# API is reachable from a runner by construction; anything else has to be argued.
+#
+# The token comes from the ENVIRONMENT, never hardcoded -- this script is
+# public-bound. Unset -> the step is skipped, exactly like the Actions secret
+# above, so re-onboarding for the ruleset alone never clobbers a good token.
+#   RELEASE_BUMP_TOKEN           a token that may dispatch the deployment repo's
+#                                bump workflow, and ideally nothing else
+#
+# One more variable, and it is a LEFTOVER, not part of the design:
+#   RELEASE_BUMP_WEBHOOK_URL     the old receiver endpoint
+# It survives only so webhook_remove can still identify the hook it deletes (a
+# repo may carry several, so the URL is the identity we own). Once no repo has
+# one, both it and webhook_remove can go.
 #
 # Renovate, likewise from the environment and likewise a pair:
 #   RENOVATE_BYPASS_APP_ID       Renovate's APP id, named as a ruleset bypass
@@ -139,8 +142,8 @@ usage: onboard.sh [--remove] <owner/repo>
               ${RULESET_NAME} branch-protection ruleset, (public
               repos) require approval for external fork PRs, set the
               ${AGENT_SECRET_NAME} secret from your environment, and
-              set the release->bump secrets the repo's release workflow
-              calls the receiver with (see below).
+              set the ${BUMP_TOKEN_SECRET} its release workflow
+              dispatches the deploy bump with (see below).
   --remove    remove the ruleset, delete any leftover release webhook, and
               detach the repo from the App. The fork-PR approval policy and
               the secrets are left in place (not undone).
@@ -149,10 +152,10 @@ Refuses to run against the control repo (gitops-homelab).
 
 Requires a human admin PAT (gh auth). Export ${AGENT_SECRET_NAME}
 (from \`claude setup-token\`) to have onboarding set it; unset, that step is
-skipped. Export RELEASE_BUMP_WEBHOOK_URL and RELEASE_BUMP_WEBHOOK_SECRET to set
-the ${BUMP_URL_SECRET} / ${BUMP_KEY_SECRET} Actions secrets; unset,
-that step is skipped too. Idempotent: safe to re-run -- re-running rotates every
-secret it sets.
+skipped. Export ${BUMP_TOKEN_SECRET} to have it set as an Actions
+secret; unset, that step is skipped too. Export RELEASE_BUMP_WEBHOOK_URL to have
+a leftover webhook from the retired receiver design deleted.
+Idempotent: safe to re-run -- re-running rotates every secret it sets.
 EOF
   exit 2
 }
@@ -333,26 +336,19 @@ function secret_set {
   report "secret" "set  ${AGENT_SECRET_NAME}"
 }
 
-# bump_secrets_set upserts the two Actions secrets a release workflow needs to
-# call the release->bump receiver: where to POST, and the key it signs the body
-# with. Same shape and same reasoning as secret_set above -- values on stdin so
-# they stay out of argv, and the pair is SKIPPED rather than blanked when the
-# environment does not carry it.
-#
-# The pair is set together or not at all. A URL without a key would make the
-# workflow POST bodies the receiver rejects unverified, which is a release that
-# fails for a reason nobody would look for.
-function bump_secrets_set {
+# bump_token_set upserts the Actions secret a release workflow dispatches the
+# deploy bump with. Same shape and same reasoning as secret_set above -- the value
+# goes on stdin so it stays out of argv, and an unset variable SKIPS rather than
+# blanks, so re-onboarding for the ruleset alone cannot clobber a good token.
+function bump_token_set {
   local slug="$1"
-  if [[ -z ${RELEASE_BUMP_WEBHOOK_URL:-} || -z ${RELEASE_BUMP_WEBHOOK_SECRET:-} ]]; then
-    report "bump" "skipped (RELEASE_BUMP_WEBHOOK_URL / _SECRET not in env)"
+  if [[ -z ${RELEASE_BUMP_TOKEN:-} ]]; then
+    report "bump" "skipped (\$${BUMP_TOKEN_SECRET} not in env)"
     return 0
   fi
-  printf '%s' "$RELEASE_BUMP_WEBHOOK_URL" |
-    gh secret set "$BUMP_URL_SECRET" --repo "$slug" >/dev/null
-  printf '%s' "$RELEASE_BUMP_WEBHOOK_SECRET" |
-    gh secret set "$BUMP_KEY_SECRET" --repo "$slug" >/dev/null
-  report "bump" "set  ${BUMP_URL_SECRET} + ${BUMP_KEY_SECRET}"
+  printf '%s' "$RELEASE_BUMP_TOKEN" |
+    gh secret set "$BUMP_TOKEN_SECRET" --repo "$slug" >/dev/null
+  report "bump" "set  ${BUMP_TOKEN_SECRET}"
 }
 
 # webhook_id echoes the id of the repo's old release->bump webhook, matched by its
@@ -448,7 +444,7 @@ function main {
     ruleset_apply "$slug"
     fork_policy_harden "$slug"
     secret_set "$slug"
-    bump_secrets_set "$slug"
+    bump_token_set "$slug"
     webhook_remove "$slug"
   fi
 }

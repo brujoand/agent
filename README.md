@@ -136,35 +136,47 @@ see the note in `onboard.sh`), and onboarding already names the repo.
 
 ## Release → deploy bump (`onboard.sh`)
 
-A repo that publishes a container image can tell a deployment receiver about it
-directly, so the deploy PR opens as soon as the image exists instead of waiting
-for something to poll the registry. Onboarding hands the repo the two values its
-release workflow needs, as Actions secrets:
+A repo that publishes a container image can tell a *deployment* repo about it, so
+the deploy PR opens as soon as the image exists instead of waiting for something
+to poll the registry. The release job dispatches a workflow in the deployment
+repo, handing it the tag and digest it just pushed. Onboarding's part is one
+Actions secret — the token that dispatch authenticates with:
 
 ```bash
-export RELEASE_BUMP_WEBHOOK_URL=https://receiver.example.com/hook/release-bump
-read -rs RELEASE_BUMP_WEBHOOK_SECRET && export RELEASE_BUMP_WEBHOOK_SECRET
-./onboard.sh owner/repo        # sets RELEASE_BUMP_URL + RELEASE_BUMP_SECRET
+read -rs RELEASE_BUMP_TOKEN && export RELEASE_BUMP_TOKEN
+./onboard.sh owner/repo        # sets RELEASE_BUMP_TOKEN
 ```
 
-The workflow then POSTs `{app, tag, digest}` signed with HMAC-SHA256 in
-`X-Hub-Signature-256`, plus `X-Bump-Source: release`. Sending the digest means
-the receiver never has to read the registry back — which it cannot do for a
-private package anyway.
+Grant that token as little as possible: `actions: write` on the deployment repo
+alone is enough to start a workflow, and not enough to write a file, push a
+branch, or read a secret. That is also why the release job uses
+`workflow_dispatch` rather than `repository_dispatch` — the latter would need
+`contents: write`.
 
-**Why the repo calls instead of a webhook.** This started as a `registry_package`
-webhook that `onboard.sh` registered per repo. GitHub delivered two consecutive
-releases about 40 minutes late and in the wrong order, so the older tag was
-applied last and the deployment was rolled backwards. Webhook delivery is a queue
-you neither control nor can order. A step in the release job runs after the push
-it reports, retries on its own, and fails the release when it cannot deliver — so
-a missed bump is loud rather than silently stale. Onboarding deletes a leftover
-webhook on the way past, since a repo carrying both would bump twice.
+**Two designs failed before this one, and both failure modes generalise.**
 
-Both variables come from your environment and are never hardcoded here: this repo
-is public, and keeping them parametric also means a fork points at its own
-receiver. Set neither and the step is skipped; there is no half-configured state,
-because a URL without a key just produces signed bodies nobody accepts.
+1. *A `registry_package` webhook*, which `onboard.sh` used to register per repo.
+   GitHub delivered two consecutive releases about 40 minutes late and **in the
+   wrong order**, so the older tag was applied last and the deployment rolled
+   backwards. Webhook delivery is a queue you neither control nor can order, and
+   no amount of care at the receiving end fixes that.
+2. *The release job POSTing at the deployment side directly.* The endpoint was
+   reachable only from GitHub's `.hooks` egress ranges — six CIDRs — while a
+   hosted runner egresses from `.actions`, ~7300 CIDRs with **zero overlap**.
+   Every call would have been dropped at the firewall.
+
+Dispatching has neither problem: the release job makes the call itself, in order,
+to `api.github.com`. No inbound path has to exist anywhere. Worth keeping as a
+rule of thumb — an outbound call to a well-known API is reachable from a runner
+by construction; anything else has to be argued for.
+
+Onboarding also deletes a leftover webhook from design 1 on the way past, since a
+repo carrying both would bump twice. That is the only thing
+`RELEASE_BUMP_WEBHOOK_URL` is still read for: it identifies the hook to delete.
+
+The token comes from your environment and is never hardcoded here — this repo is
+public. Leave it unset and the step is skipped rather than clobbering a good
+token with a blank.
 
 ## Hygiene: the internal-infra denylist
 
