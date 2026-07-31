@@ -23,6 +23,8 @@ never sees:
   decides whether to load it;
 - a **rule** ([`../rules/`](../rules)) is always on — in context before the first
   response, every session;
+- an **output style** ([`../output-styles/`](../output-styles)) is spliced into
+  the system prompt — register, before the conversation starts;
 - a **hook** is not context at all. It is the harness running a command when
   something happens, which is where a check belongs the moment it can be made
   deterministic. Nothing to remember, nothing to skip.

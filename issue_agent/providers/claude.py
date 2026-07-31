@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import sys
+from pathlib import Path
 from types import TracebackType
 
 from claude_agent_sdk import (
@@ -31,6 +32,16 @@ from providers.base import SessionConfig, TurnResult, TurnUsage
 # Cost ceiling per query; wall-clock MAX_RUNTIME_SECONDS still bounds the
 # whole session.
 MAX_TURNS = 50
+
+# House register, shared with the interactive setup.
+#
+# Interactively, Claude Code loads ~/.claude/output-styles/terse.md, symlinked
+# there by `agent output-styles install`. This runtime never sees that: the image
+# carries no user-level ~/.claude, and sessions open with
+# setting_sources=["project"] on purpose. So the same file is read from the repo
+# tree and appended to the claude_code system-prompt preset instead -- one source
+# of truth, two delivery mechanisms.
+OUTPUT_STYLE = "terse"
 
 # Tools every session gets regardless of role: read/search, edit, delegate to a
 # subagent, and the git/gh/pre-commit/mise plumbing both the issue and PR agents
@@ -81,6 +92,43 @@ def allowed_tools_for(kind: str) -> list[str]:
     if kind == "issue" and os.environ.get("AGENT_CLUSTER_TOOLS") == "1":
         tools += _CLUSTER_READ_TOOLS
     return tools
+
+
+def style_dirs() -> list[Path]:
+    """Where the output-styles tree can be, most specific first.
+
+    `/opt/issue-agent/output-styles` in the image (the Dockerfile copies the tree
+    in beside this wrapper), `<repo>/output-styles` in a checkout -- which is
+    what the tests and a local run see. Two candidates rather than an env var:
+    the file ships with the code, so it should be found the same way the code is.
+    """
+    here = Path(__file__).resolve()
+    return [here.parents[1] / "output-styles", here.parents[2] / "output-styles"]
+
+
+def _strip_frontmatter(text: str) -> str:
+    """Drop a leading `---` block. Its keys are Claude Code picker metadata
+    (name, description, keep-coding-instructions), not instructions, and the
+    preset append takes prose."""
+    if not text.startswith("---"):
+        return text
+    end = text.find("\n---", 3)
+    return text[end + 4 :] if end != -1 else text
+
+
+def style_body(name: str = OUTPUT_STYLE) -> str:
+    """The style's instructions, or "" if the tree is not there.
+
+    Missing is a warning, not a fatal: a register tweak must never be the thing
+    that stops the agent from answering an issue.
+    """
+    for directory in style_dirs():
+        path = directory / f"{name}.md"
+        if path.is_file():
+            return _strip_frontmatter(path.read_text()).strip()
+    searched = ", ".join(str(d) for d in style_dirs())
+    print(f"WARN: no output style {name}.md found in {searched}", file=sys.stderr)
+    return ""
 
 
 def _env_required(name: str) -> str:
@@ -141,10 +189,19 @@ class ClaudeProvider:
         # only resume when there is a store to resume from.
         store_kwargs = {"session_store": self._store} if self._store is not None else {}
         resume = config.resume and self._store is not None
+        # The preset IS the previous behaviour (an unset system_prompt lets the
+        # CLI use its own), so this only adds the style on top -- it replaces
+        # nothing. An empty body means the tree was not found: keep the preset,
+        # drop the append.
+        style = style_body()
+        system_prompt = {"type": "preset", "preset": "claude_code"}
+        if style:
+            system_prompt["append"] = style
         opts = ClaudeAgentOptions(
             model=config.model,
             max_turns=MAX_TURNS,
             permission_mode="acceptEdits",
+            system_prompt=system_prompt,
             setting_sources=["project"],  # load CLAUDE.md + .claude/agents/
             allowed_tools=allowed_tools_for(config.kind),
             # Operate on the checked-out repo (Actions sets GITHUB_WORKSPACE),

@@ -11,7 +11,10 @@ when the task matches, and too expensive to carry otherwise.
 Always-on house style is the opposite case and lives in [`../rules/`](../rules),
 imported into `~/.claude/CLAUDE.md` by `agent rules install`. `working-with-brujoand`
 started here and moved there for exactly that reason: as a skill it was merely
-*available*, and a session that never invoked it never followed it.
+*available*, and a session that never invoked it never followed it. Register —
+how an answer reads rather than what it does — goes one step further out, into
+[`../output-styles/`](../output-styles), which Claude Code splices into the
+system prompt.
 
 ## Skills
 

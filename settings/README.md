@@ -2,10 +2,10 @@
 
 `settings.json` here is Claude Code's own settings schema. `agent settings
 install` merges the keys it declares into `~/.claude/settings.json`; `agent
-install` runs it alongside skills, rules, and hooks.
+install` runs it alongside skills, rules, hooks, and output styles.
 
-This is the fourth way the repo ships behaviour, and the only one that ships
-**policy** rather than code:
+This is the last of the five ways the repo ships behaviour, and the only one that
+ships **policy** rather than code:
 
 - a **skill** ([`../skills/`](../skills)) is opt-in — Claude decides whether to
   load it;
@@ -13,6 +13,8 @@ This is the fourth way the repo ships behaviour, and the only one that ships
   response;
 - a **hook** ([`../hooks/`](../hooks)) is not context at all — the harness running
   a command when something happens;
+- an **output style** ([`../output-styles/`](../output-styles)) is spliced into
+  the system prompt — register, before the conversation starts;
 - a **setting** is not context either, and not a command: it is a knob on the
   harness itself. `effortLevel` and `autoCompactWindow` are cost controls, and a
   cost control you have to remember to re-apply on each host is not a control.
@@ -68,6 +70,7 @@ references.
 | key | value | why |
 |---|---|---|
 | `effortLevel` | `high` | Claude Code defaults to `xhigh`. Measured on this host, ~97% of output tokens are thinking — about 17% of total spend — and `high` is the documented recommended minimum for intelligence-sensitive work. Drop to `medium` per session for mechanical passes with `/effort`. |
+| `outputStyle` | `terse` | Selects [`../output-styles/terse.md`](../output-styles/terse.md). The tree ships every style; this key is what makes one active, so a style is never on until it is declared here. Matched on the style's frontmatter `name`, which defaults to the filename — [`tests/test_output_styles.py`](../tests/test_output_styles.py) asserts the key, the filename and the `name` still agree. |
 | `autoCompactEnabled` | `true` | Explicit, because `autoCompactWindow` means nothing without it. |
 | `autoCompactWindow` | `450000` | The big one, and the one to revisit. On a 1M-context model nothing forces a reset, so sessions coast at 400–900k and every turn re-reads all of it: `agent usage` measured turns above 200k context at 45% of turns but **76% of all re-read tokens**, roughly half of total spend. So there is a cap. Where it sits is a trade, not a measurement — lower means cheaper turns and more compactions, higher means fewer interruptions and more re-read tokens per turn. Raised from `250000` in July 2026, and the reason is the half of the trade the token figures do not show: at 250k, real sessions compacted *mid-task*, and a compaction landing before the work is done costs the summary **and** the re-read, having also dropped detail the task still needed. It is also the budget [`hooks/context-budget.sh`](../hooks/context-budget.sh) warns against (at 60% and 85%, so now 270k and 382k), so the two move together by construction. |
 | `env.*` (telemetry) | see below | Claude Code's OpenTelemetry exporter, pointed at the workspace's Prometheus OTLP receiver. |
