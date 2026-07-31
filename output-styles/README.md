@@ -51,8 +51,18 @@ there to read.
 
 ## Styles
 
-- **terse** — house register: no performative language, no meta-commentary
-  about the model's own honesty or effort, corrections stated as corrections,
-  uncertainty expressed as a claim about the world. The written-down half of
-  what `../rules/working-with-brujoand.md` asks for in prose, moved to the one
-  channel that shapes voice before the conversation starts.
+- **terse** — house register: no performative language, no meta-commentary about
+  the model's own honesty or effort, corrections stated as corrections,
+  uncertainty expressed as a claim about the world. The written-down half of what
+  `../rules/working-with-brujoand.md` asks for in prose, moved to the one channel
+  that shapes voice before the conversation starts.
+
+  Two things about how it is written are deliberate. It **leads with the positive
+  register** and demotes the banned-phrase list to a backstop with its reason
+  attached: Anthropic's own prompting guidance rates "do X" above bare "never X",
+  and a long list of forbidden phrases mildly primes the phrases it lists. The
+  list stays because it is cheap and works as a backstop — it just does not carry
+  the design. And it carves out **caveats explicitly**: genuine uncertainty,
+  risks, assumptions and blockers are content, not fluff. Without that line a
+  terseness instruction reads as licence to drop the warning along with the
+  padding, which is the one failure mode that costs more than it saves.
