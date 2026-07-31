@@ -27,16 +27,25 @@ job), but the convention holds.
 `rules.py` (import the always-on rules in `rules/` into `~/.claude/CLAUDE.md`),
 `hooks.py` (link `hooks/` **and** wire them into `~/.claude/settings.json`),
 `settings.py` (converge the values in `settings/` into `~/.claude/settings.json`),
+`output_styles.py` (symlink `output-styles/` into `~/.claude/output-styles/`),
 `freshness.py` (is the checkout current, and would `agent install` change anything),
 `usage.py` (what drives Claude Code token spend, from the local transcripts),
 `install.py`, `doctor.py`, `creds.py`/`labpass.py`, `config.py`, `errors.py`.
 
-The four distribution trees — `skills/`, `rules/`, `hooks/`, `settings/` — all
-install idempotently, are re-runnable forever, and touch nothing they do not own.
-`hooks.py` and `settings.py` both write `~/.claude/settings.json`: hooks owns the
-`hooks` key, settings owns the declared value keys and **refuses** to declare
-`hooks`, so the two never contend. Add a new managed setting by adding a key to
-`settings/settings.json` — nothing else.
+The five distribution trees — `skills/`, `rules/`, `hooks/`, `settings/`,
+`output-styles/` — all install idempotently, are re-runnable forever, and touch
+nothing they do not own. `hooks.py` and `settings.py` both write
+`~/.claude/settings.json`: hooks owns the `hooks` key, settings owns the declared
+value keys and **refuses** to declare `hooks`, so the two never contend. Add a new
+managed setting by adding a key to `settings/settings.json` — nothing else.
+
+Output styles are two halves like hooks: `output-styles/` ships every style, and
+the `outputStyle` key in `settings/settings.json` decides which one is active — so
+`agent install` links the styles before it converges the settings. The issue agent
+cannot use that path (no user-level `~/.claude` in the image,
+`setting_sources=["project"]`), so `issue_agent/providers/claude.py` reads the same
+file and appends it to the `claude_code` system-prompt preset; the Dockerfile
+copies the tree in beside the wrapper.
 
 Adding a **new tree** means adding a line to `freshness.TREES` as well;
 `tests/test_freshness.py` discovers every module exposing `source_dir` + `check`

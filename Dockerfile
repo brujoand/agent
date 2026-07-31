@@ -55,10 +55,16 @@ RUN npm install -g @anthropic-ai/claude-code@2.1.195 \
 # source copied to /opt/issue-agent. The issue-agent workflow runs
 # `/opt/issue-agent/venv/bin/python /opt/issue-agent/agent.py`.
 COPY issue_agent/ /opt/issue-agent/
+# The output styles the interactive setup symlinks into ~/.claude/output-styles/.
+# This runtime has no user-level ~/.claude and loads project settings only, so
+# providers/claude.py reads the style out of this tree and appends it to the
+# system-prompt preset instead. Same file, same PR, both ways of shipping it.
+COPY output-styles/ /opt/issue-agent/output-styles/
 RUN python3 -m venv /opt/issue-agent/venv \
  && /opt/issue-agent/venv/bin/pip install --no-cache-dir \
       -r /opt/issue-agent/requirements.txt \
- && /opt/issue-agent/venv/bin/python -c "import sys; sys.path.insert(0, '/opt/issue-agent'); import agent, providers.claude, boto3"
+ && /opt/issue-agent/venv/bin/python -c "import sys; sys.path.insert(0, '/opt/issue-agent'); import agent, providers.claude, boto3" \
+ && test -f /opt/issue-agent/output-styles/terse.md
 
 # The agent CLI. Baked in so it exists BEFORE `actions/checkout` runs -- the
 # checkout token is what it mints. That ordering is the whole reason the mint

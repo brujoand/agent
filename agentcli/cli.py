@@ -14,6 +14,7 @@ from agentcli import (
     install,
     issue_enable,
     labpass,
+    output_styles,
     pull,
     repos,
     rules,
@@ -50,6 +51,11 @@ hooks_app = typer.Typer(
 settings_app = typer.Typer(
     name="settings", help="Apply the workspace's managed Claude settings.", no_args_is_help=True
 )
+output_styles_app = typer.Typer(
+    name="output-styles",
+    help="Install the workspace's shared Claude output styles.",
+    no_args_is_help=True,
+)
 setup_app = typer.Typer(
     name="setup",
     help="Human-only privileged setup. Refuses to run with agent credentials.",
@@ -66,6 +72,7 @@ app.add_typer(skills_app)
 app.add_typer(rules_app)
 app.add_typer(hooks_app)
 app.add_typer(settings_app)
+app.add_typer(output_styles_app)
 app.add_typer(setup_app)
 app.add_typer(access_app)
 
@@ -483,6 +490,35 @@ def settings_list() -> None:
     print(f"\n{settings.settings_file()}: {settings.status()}")
 
 
+@output_styles_app.command("install")
+def output_styles_install() -> None:
+    """Symlink the shared output styles into ~/.claude/output-styles/. Idempotent.
+
+    Installing a style does not select it: the active one is the `outputStyle`
+    key, which `agent settings install` converges. Start a new Claude session to
+    pick up newly linked styles.
+    """
+    try:
+        results = output_styles.install()
+    except AgentError as err:
+        print(f"ERROR: {err}")
+        raise typer.Exit(1) from err
+    for name, outcome in results:
+        print(f"  {name:<28} {outcome}")
+    print(f"\noutput-styles: {len(results)} shared style(s) -> {output_styles.dest_dir()}")
+
+
+@output_styles_app.command("list")
+def output_styles_list() -> None:
+    """List the shared output styles and whether each is linked for this user."""
+    available = output_styles.available()
+    if not available:
+        print(f"no shared output styles at {output_styles.source_dir()} -- run `agent pull` first")
+        return
+    for style in available:
+        print(f"  {style.name:<28} {output_styles.status(style.name)}")
+
+
 # One command for a fresh host. Each installer is idempotent and independent, so
 # this is only ever a convenience -- and it keeps every future distribution tree
 # reachable from one place instead of a growing list to remember.
@@ -492,16 +528,20 @@ def install_command(
         False, "--lab", help="Also install the lab CLI (needs the sibling gitops checkout)."
     ),
 ) -> None:
-    """Install everything this repo distributes: skills, rules, and hooks.
+    """Install everything this repo distributes: skills, rules, hooks, styles, settings.
 
     `lab` is opt-in: it provisions a toolchain over the network and needs a
     sibling checkout, so a routine `agent install` should not depend on it.
     """
     failures = 0
+    # Styles before settings: the settings declaration names the active style, so
+    # linking the tree first means the key is never pointing at a file that is not
+    # there yet.
     for label, run in (
         ("skills", lambda: f"{len(skills.install())} linked -> {skills.dest_dir()}"),
         ("rules", lambda: f"block {rules.install()[0]} in {rules.memory_file()}"),
         ("hooks", lambda: _install_hooks_summary()),
+        ("styles", lambda: f"{len(output_styles.install())} linked -> {output_styles.dest_dir()}"),
         ("settings", lambda: _install_settings_summary()),
     ):
         try:
@@ -520,7 +560,7 @@ def install_command(
         print("\n  lab      skipped -- run `agent install --lab` to install it too")
 
     print(f"\ninstall: {'all set' if not failures else f'{failures} step(s) failed'}")
-    print("Start a new Claude session to pick up newly linked skills, rules, and hooks.")
+    print("Start a new Claude session to pick up newly linked skills, rules, hooks, and styles.")
     raise typer.Exit(1 if failures else 0)
 
 

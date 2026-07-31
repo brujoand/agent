@@ -259,19 +259,31 @@ agent rules install             # import the always-on Claude rules into ~/.clau
 agent rules list                # show each shared rule and whether the import block is current
 agent hooks install             # link the shared Claude hooks AND wire them into settings.json
 agent hooks list                # show each shared hook, where it is wired, and whether it is linked
-agent install                   # all three of the above at once (--lab to add the lab CLI)
+agent settings install          # converge the managed values into ~/.claude/settings.json
+agent settings list             # show each managed key and whether it is already applied
+agent output-styles install     # symlink the shared output styles into ~/.claude/output-styles
+agent output-styles list        # show each shared style and whether it is linked
+agent install                   # all of the above at once (--lab to add the lab CLI)
 agent freshness                 # is this host loading what is on origin? silent + exit 0 when yes
 agent pull --here               # fast-forward just the checkout containing this directory
 ```
 
-### Shared Claude skills, rules, and hooks
+### Shared Claude skills, rules, hooks, and output styles
 
-Three trees, one source of truth each, all tracked and PR-reviewed here, and all
+Four trees, one source of truth each, all tracked and PR-reviewed here, and all
 installed **once per user** — covering every repo and every worktree, since they
-all read the same `~/.claude`. All three point at this checkout, so `agent pull`
+all read the same `~/.claude`. All four point at this checkout, so `agent pull`
 fast-forwarding the agent repo updates them in place — no reinstall, no drift.
-`agent doctor` reports on all three, every install is idempotent, and `agent
-install` runs them together for a fresh host.
+`agent doctor` reports on all four, every install is idempotent, and `agent
+install` runs them together for a fresh host. (A fifth tree, `settings/`, ships
+*values* rather than behaviour; it has its own README.)
+
+| | `skills/` | `rules/` | `hooks/` | `output-styles/` |
+|---|---|---|---|---|
+| Loaded | when Claude picks the skill | every session, everywhere | when its event fires | every session, in the system prompt |
+| Installed as | symlinks into `~/.claude/skills/` | `@`-imports in `~/.claude/CLAUDE.md` | symlinks into `~/.claude/hooks/` **+ entries in `~/.claude/settings.json`** | symlinks into `~/.claude/output-styles/` **+ the `outputStyle` key** |
+| Command | `agent skills install` | `agent rules install` | `agent hooks install` | `agent output-styles install` |
+| For | a task procedure, loaded on demand | house style and host facts | a deterministic reaction to an event | register — how the answer reads |
 
 That same property — links pointing *into* the checkout — is what makes staleness
 silent, so it gets its own check. A checkout behind `origin` resolves every link
@@ -292,12 +304,6 @@ was last on disk. `agent pull --here` fast-forwards that one checkout, and
 Clean tree, default branch, `--ff-only`, worktrees excluded: a feature branch
 with work on it is never a candidate.
 
-| | `skills/` | `rules/` | `hooks/` |
-|---|---|---|---|
-| Loaded | when Claude picks the skill | every session, everywhere | when its event fires |
-| Installed as | symlinks into `~/.claude/skills/` | `@`-imports in `~/.claude/CLAUDE.md` | symlinks into `~/.claude/hooks/` **+ entries in `~/.claude/settings.json`** |
-| Command | `agent skills install` | `agent rules install` | `agent hooks install` |
-| For | a task procedure, loaded on demand | house style and host facts | a deterministic reaction to an event |
 
 The skill/rule split is the whole point: a skill is **opt-in**, so it is the
 wrong home for anything that must shape the *first* response.
@@ -308,14 +314,32 @@ neither: it is not in the model's context at all, it is the harness running a
 command when something happens — which is where a check belongs once it can be
 made deterministic.
 
-Hooks are the one tree that needs two halves installed. Claude Code runs a hook
-because some `settings.json` *names* it, not because the file exists, so a
-symlink alone installs a silent no-op. Each hook's event and matcher therefore
-live in `hooks/hooks.json`, reviewed in the same diff as the script, and
-`hooks install` merges them into the user's settings.
+An output style is a fourth thing again, and the difference is *where the text
+lands*. A rule arrives as content, in the same channel as the task and competing
+with it for attention — right for host facts, wrong for register. Claude Code
+splices an output style into the **system prompt**, so it shapes voice before the
+first token of the conversation exists. `keep-coding-instructions: true` keeps the
+default coding instructions alongside it, so a style tunes register without
+throwing the harness away.
 
-No install clobbers what the user owns: a hand-made skill directory or hook file
-is reported as a conflict and left alone, `rules install` only ever rewrites text
+Two trees need two halves installed. Claude Code runs a hook because some
+`settings.json` *names* it, not because the file exists, so a symlink alone
+installs a silent no-op; each hook's event and matcher live in `hooks/hooks.json`,
+reviewed in the same diff as the script, and `hooks install` merges them into the
+user's settings. Output styles split the same way: the tree ships every style,
+and the `outputStyle` key in `settings/settings.json` decides which one is
+active, so `agent install` links the styles before it converges the settings.
+
+The issue/PR agent gets the register by a second route, because it cannot use the
+first: its container has no user-level `~/.claude` and opens sessions with
+`setting_sources=["project"]`, so it never sees `~/.claude/output-styles/`.
+`issue_agent/providers/claude.py` reads the same file out of `output-styles/` and
+appends its body to the `claude_code` system-prompt preset. One file in the repo,
+two delivery mechanisms — and a test asserts the settings key, the filename, and
+the style's own `name` still agree.
+
+No install clobbers what the user owns: a hand-made skill directory, hook file or
+output style is reported as a conflict and left alone, `rules install` only ever rewrites text
 between its own markers in `~/.claude/CLAUDE.md`, and `hooks install` only ever
 touches settings entries pointing at a script of ours — a hand-wired hook in the
 same file is left exactly as it is.

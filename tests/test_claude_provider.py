@@ -19,6 +19,8 @@ from providers.claude import (
     TOOL_POLICY,
     ClaudeProvider,
     allowed_tools_for,
+    style_body,
+    style_dirs,
 )
 
 
@@ -85,6 +87,41 @@ def open_faked_session(monkeypatch, config, script):
 
 
 CFG = SessionConfig(model="claude-opus-4-8", cwd="/work", session_id="sid-1")
+
+
+# --- output style: the same file the interactive setup symlinks ---------------
+
+
+def test_style_body_strips_frontmatter_and_keeps_the_instructions():
+    body = style_body()
+    assert body, "the repo's output-styles tree should be found from a checkout"
+    assert not body.startswith("---")
+    assert "keep-coding-instructions" not in body
+    assert "## Register" in body
+
+
+def test_style_dirs_cover_the_image_and_a_checkout():
+    names = [str(d) for d in style_dirs()]
+    # /opt/issue-agent/output-styles in the image, <repo>/output-styles locally.
+    assert names[0].endswith("issue_agent/output-styles")
+    assert names[1].endswith("agent/output-styles") or names[1].endswith("output-styles")
+
+
+def test_open_session_appends_the_style_to_the_claude_code_preset(monkeypatch):
+    session = open_faked_session(monkeypatch, CFG, [])
+    prompt = session._client.options.system_prompt
+    assert prompt["type"] == "preset"
+    assert prompt["preset"] == "claude_code"
+    assert "## Register" in prompt["append"]
+
+
+def test_open_session_keeps_the_preset_when_no_style_is_found(monkeypatch, tmp_path, capsys):
+    import providers.claude as claude
+
+    monkeypatch.setattr(claude, "style_dirs", lambda: [tmp_path / "nowhere"])
+    session = open_faked_session(monkeypatch, CFG, [])
+    assert session._client.options.system_prompt == {"type": "preset", "preset": "claude_code"}
+    assert "WARN: no output style" in capsys.readouterr().err
 
 
 def test_run_turn_joins_assistant_text_blocks(monkeypatch):

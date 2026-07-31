@@ -23,6 +23,8 @@
 
   "effortLevel": "high",
 
+  "outputStyle": "terse",
+
   "autoCompactEnabled": true,
   "autoCompactWindow": 450000,
 

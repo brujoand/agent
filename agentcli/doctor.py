@@ -5,6 +5,7 @@ from agentcli import (
     git,
     github,
     hooks,
+    output_styles,
     repos,
     rules,
     settings,
@@ -118,6 +119,12 @@ def _check_hooks() -> bool:
     return ok
 
 
+def _check_output_styles() -> bool:
+    ok, detail = output_styles.check()
+    _line(_OK if ok else _BAD, "styles", detail)
+    return ok
+
+
 def _check_settings() -> bool:
     ok, detail = settings.check()
     _line(_OK if ok else _BAD, "settings", detail)
@@ -143,6 +150,7 @@ def run() -> int:
         _check_skills,
         _check_rules,
         _check_hooks,
+        _check_output_styles,
         _check_settings,
         _check_freshness,
     ]

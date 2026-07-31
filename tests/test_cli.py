@@ -35,8 +35,37 @@ def _isolated(monkeypatch, tmp_path):
 def test_help_lists_every_sub_app():
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0
-    for name in ("github", "workspace", "skills", "rules", "hooks", "settings", "usage", "doctor"):
+    for name in (
+        "github",
+        "workspace",
+        "skills",
+        "rules",
+        "hooks",
+        "settings",
+        "output-styles",
+        "usage",
+        "doctor",
+    ):
         assert name in result.stdout
+
+
+def test_output_styles_list_runs(monkeypatch, tmp_path):
+    repo, _ = _isolated(monkeypatch, tmp_path)
+    (repo / "output-styles").mkdir(parents=True)
+    (repo / "output-styles" / "terse.md").write_text("---\nname: terse\n---\n\nbody\n")
+    result = runner.invoke(app, ["output-styles", "list"])
+    assert result.exit_code == 0
+    assert "terse.md" in result.stdout
+    assert "missing" in result.stdout
+
+
+def test_output_styles_install_links(monkeypatch, tmp_path):
+    repo, config = _isolated(monkeypatch, tmp_path)
+    (repo / "output-styles").mkdir(parents=True)
+    (repo / "output-styles" / "terse.md").write_text("---\nname: terse\n---\n\nbody\n")
+    result = runner.invoke(app, ["output-styles", "install"])
+    assert result.exit_code == 0
+    assert (config / "output-styles" / "terse.md").is_symlink()
 
 
 def test_settings_list_runs(monkeypatch, tmp_path):
