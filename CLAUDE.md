@@ -29,6 +29,7 @@ job), but the convention holds.
 `settings.py` (converge the values in `settings/` into `~/.claude/settings.json`),
 `output_styles.py` (symlink `output-styles/` into `~/.claude/output-styles/`),
 `freshness.py` (is the checkout current, and would `agent install` change anything),
+`inflight.py` (what is already in flight on a repo: open PRs, session worktrees),
 `usage.py` (what drives Claude Code token spend, from the local transcripts),
 `install.py`, `doctor.py`, `creds.py`/`labpass.py`, `config.py`, `errors.py`.
 

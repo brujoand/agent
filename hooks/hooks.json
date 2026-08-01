@@ -20,6 +20,11 @@
           "type": "command",
           "script": "repo-freshness.sh",
           "timeout": 25
+        },
+        {
+          "type": "command",
+          "script": "inflight.sh",
+          "timeout": 30
         }
       ]
     }

@@ -11,6 +11,7 @@ from agentcli import (
     ghpass,
     github,
     hooks,
+    inflight,
     install,
     issue_enable,
     labpass,
@@ -117,6 +118,38 @@ def pull_command(
 def doctor_command() -> None:
     """Check credentials, token, reachable repos, lab, and credential helpers."""
     raise typer.Exit(doctor.run())
+
+
+@app.command("inflight")
+def inflight_command(
+    repo: str = typer.Option(None, "--repo", help="Repo name (default: resolved from --path)."),
+    path: str = typer.Option(
+        None, "--path", help="Directory to resolve a repo from (default: cwd)."
+    ),
+    context: bool = typer.Option(
+        False, "--context", help="Emit the block a SessionStart hook injects, not a listing."
+    ),
+) -> None:
+    """What is already in flight on this repo: open PRs and session worktrees.
+
+    `agent freshness` asks whether the base is current. This asks whether someone
+    is already doing the work -- a different question, and the one git cannot
+    answer, because an open PR is not on the default branch.
+
+    Silent when the repo is quiet. Advisory only: it never fails a session, so a
+    GitHub outage costs a warning, not a start.
+    """
+    name = repo or inflight.repo_for(Path(path) if path else None)
+    if not name:
+        raise typer.Exit(0)
+    if context:
+        block = inflight.context_block(name)
+        if block:
+            print(block)
+    else:
+        lines = inflight.report(name)
+        print("\n".join(lines) if lines else f"{name}: nothing in flight")
+    raise typer.Exit(0)
 
 
 @app.command("freshness")
