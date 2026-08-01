@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -417,19 +418,30 @@ def test_budget_script_takes_its_budget_from_auto_compact_window(tmp_path):
     assert out.split() == ["none", "228000", "400000"]
 
 
+def _script_default_budget() -> int:
+    """The script's own fallback, read from the script. Hardcoding it here would
+    make tuning the window a three-file change; test_settings.py separately
+    asserts this value tracks the declared `autoCompactWindow`."""
+    match = re.search(r"^readonly DEFAULT_BUDGET=(\d+)$", BUDGET_SCRIPT.read_text(), re.MULTILINE)
+    assert match, "context-budget.sh no longer declares DEFAULT_BUDGET"
+    return int(match.group(1))
+
+
 @pytest.mark.parametrize("settings", ["not json at all", "{}", '{"theme": "auto"}'])
 def test_budget_script_falls_back_to_the_default_window(tmp_path, settings):
     config = tmp_path / "cfg"
     config.mkdir()
     (config / "settings.json").write_text(settings)
-    path = _transcript(tmp_path, _usage_line(228_000))
+    fallback = _script_default_budget()
+    tokens = fallback * 9 // 10  # 90% of the fallback -- past the `high` threshold
+    path = _transcript(tmp_path, _usage_line(tokens))
 
     out = _budget_run(
         {"transcript_path": str(path), "session_id": "t"},
         env={"CLAUDE_CONFIG_DIR": str(config)},
     )
 
-    assert out.split() == ["high", "228000", "250000"]
+    assert out.split() == ["high", str(tokens), str(fallback)]
 
 
 def test_budget_script_emits_a_system_message_and_nothing_else(tmp_path):

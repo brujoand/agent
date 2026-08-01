@@ -65,7 +65,9 @@ warning lands *before* the compaction window, while the free option is still the
 one on the table.
 
 The budget is `autoCompactWindow` from `settings.json` — one number to tune, not
-two — falling back to 250k. `AGENT_CONTEXT_BUDGET` overrides it per session.
+two — falling back to the same value declared in
+[`settings/settings.json`](../settings/settings.json), which a test asserts the
+two files agree on. `AGENT_CONTEXT_BUDGET` overrides it per session.
 
 Warnings go out as a `systemMessage`, which reaches the human only. Nothing else
 may reach stdout: `UserPromptSubmit` stdout is injected into the model's context,
