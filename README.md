@@ -266,6 +266,7 @@ agent output-styles list        # show each shared style and whether it is linke
 agent install                   # all of the above at once (--lab to add the lab CLI)
 agent freshness                 # is this host loading what is on origin? silent + exit 0 when yes
 agent pull --here               # fast-forward just the checkout containing this directory
+agent inflight                  # open PRs + session worktrees on this repo, before you duplicate one
 ```
 
 ### Shared Claude skills, rules, hooks, and output styles

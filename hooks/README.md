@@ -153,3 +153,36 @@ early on an `agent_type` payload.
 echo '{"source":"startup","cwd":"'"$HOME"'/src/agent"}' | hooks/repo-freshness.sh --print
 # demo: pulled 1 commit from origin/main     <- or empty when already current
 ```
+
+## `inflight.sh`
+
+Tells a starting session what is already in flight on the repo it opened in:
+open pull requests, and session worktrees already on disk.
+
+This is a different question from the two above, and the case that bought it was
+expensive. On 2026-07-29 an agent session opened PR #59 raising the auto-compact
+window to 450k. On 2026-08-01 another session was asked for the same change,
+checked that its checkout was current — it was — wrote the change from scratch as
+#63, and merged it. #59 was left permanently conflicted: every line it touched
+had been changed underneath it, so it could not be rebased, only abandoned.
+
+**Pulling `main` would not have prevented that.** The base *was* current. The
+duplicated work was never on `main` — it sat in an open pull request, which is
+exactly where `git` cannot see it. So this asks GitHub.
+
+Unlike its two siblings it writes to the **model's** context
+(`hookSpecificOutput.additionalContext`), not to a `systemMessage`. The asymmetry
+is the whole design: the human is not the actor about to open a duplicate PR. An
+agent that cannot see #59 will write #59 again no matter what the terminal says.
+
+That is a real context cost, so it is bounded — ten PRs, four files each, one
+line apiece, and nothing at all when the repo is quiet. Truncation is always
+reported (`+N more`) rather than silent. Advisory only: no credentials, no
+network, no `gh`, or an older CLI all produce silence and exit 0, because a
+session must start whether or not GitHub answers.
+
+```bash
+echo '{"source":"startup","cwd":"'"$HOME"'/src/agent"}' | hooks/inflight.sh --print
+# Work already in flight on this repo — check for overlap BEFORE writing code...
+#   #59 [chore/compact-window-450] chore(settings): raise the auto-compact window to 450k — touches settings/settings.json +2 more
+```
