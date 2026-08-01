@@ -84,3 +84,36 @@ printf '{"message":{"usage":{"cache_read_input_tokens":228000}}}\n' > /tmp/t.jso
 echo '{"transcript_path":"/tmp/t.jsonl"}' | hooks/context-budget.sh --print
 # high 228000 250000     <- level, resident tokens, budget
 ```
+
+## `config-freshness.sh`
+
+Warns at session start when this host is not loading the config that is on
+origin. `agent freshness` is the whole implementation; the hook decides when to
+ask and how to say it.
+
+Why it needs a hook rather than a place in `agent doctor` (where it also lives):
+the trees are symlinked *into* `~/src/agent`, which is what lets `agent pull`
+update every session on the host with no reinstall — and the same property makes
+staleness silent. A checkout twelve commits behind resolves every link cleanly,
+so every per-tree probe passes while the rules actually loaded are the old ones.
+Pulling alone is not sufficient either: it updates the contents of what is
+already linked, but a skill or rule added upstream since install last ran has no
+link at all. Neither failure announces itself, and both are fixed by a command
+nobody thinks to run. So the check runs at the one moment it can still change
+what the session does — before the first prompt.
+
+It never waits on the network. The comparison is against the refs already on
+disk, and a ref older than fifteen minutes triggers a *background* fetch so the
+next session is accurate. The cost of that trade, stated plainly: a push to
+origin can go unnoticed for one session. `agent doctor` fetches synchronously
+instead, because that is the command you run when you want the real answer.
+
+Output is a `systemMessage` — human only, never the model's context. A warning
+about config drift is for the person who can run `agent pull`. Subagents get
+their own `SessionStart`, so the hook exits early when the payload carries an
+`agent_type`: one warning per session is a warning, one per subagent is noise.
+
+```bash
+echo '{"source":"startup"}' | hooks/config-freshness.sh --print
+# (empty when current; one line naming the drift and the fix when not)
+```

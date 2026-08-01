@@ -29,14 +29,24 @@ def helper_spec() -> str:
 
 
 def run(
-    args: list[str], cwd: Path | None = None, check: bool = True
+    args: list[str], cwd: Path | None = None, check: bool = True, timeout: float | None = None
 ) -> subprocess.CompletedProcess:
-    result = subprocess.run(
-        ["git", *args],
-        cwd=cwd,
-        capture_output=True,
-        text=True,
-    )
+    """Run git and capture it. `timeout` bounds calls that touch the network.
+
+    A timeout is reported as an `AgentGitError` like any other failure, so a
+    caller that is willing to proceed without the network can catch it -- which
+    is what a check running on a session's critical path must do.
+    """
+    try:
+        result = subprocess.run(
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise AgentGitError(f"git {' '.join(args)} timed out after {timeout}s") from exc
     if check and result.returncode != 0:
         raise AgentGitError(
             f"git {' '.join(args)} failed (exit {result.returncode})\n{result.stderr.strip()}"
