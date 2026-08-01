@@ -20,6 +20,12 @@ branches, touching which files. Plus the local half -- session worktrees that
 exist on disk -- because an abandoned worktree from a previous session is the
 same hazard one layer closer.
 
+The same query answers a second question that also cost real work: is any open PR
+**stacked** on another? Squash merges delete the parent branch and rewrite its
+commits, so merging a parent before its child leaves the child with a base that no
+longer exists -- conflicted or closed, and the work looks merged. Three PRs went
+that way. `stack_lines` states the surviving merge order for each one it finds.
+
 ## This one is for the model, not the human
 
 The other two SessionStart hooks emit a `systemMessage`, which reaches the human
@@ -40,7 +46,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from agentcli import freshness, github, workspace
+from agentcli import freshness, git, github, workspace
 from agentcli.config import repo_path
 
 # Enough to see a crowded repo, few enough that a session start never pays for a
@@ -62,6 +68,7 @@ class PullRequest:
     branch: str
     files: list[str]
     total_files: int
+    base: str = ""
 
     def line(self) -> str:
         shown = ", ".join(self.files)
@@ -119,7 +126,7 @@ def open_pull_requests(slug: str, limit: int = LIMIT) -> list[PullRequest]:
             "--limit",
             str(limit),
             "--json",
-            "number,title,headRefName,files",
+            "number,title,headRefName,baseRefName,files",
         ],
         slug,
     )
@@ -138,9 +145,40 @@ def open_pull_requests(slug: str, limit: int = LIMIT) -> list[PullRequest]:
                 branch=str(item.get("headRefName", "")),
                 files=files[:FILES_PER_PR],
                 total_files=len(files),
+                base=str(item.get("baseRefName", "")),
             )
         )
     return found
+
+
+def stacked(prs: list[PullRequest], default: str) -> list[tuple[PullRequest, PullRequest | None]]:
+    """`(child, parent)` for every open PR based on something other than `default`.
+
+    `parent` is the open PR whose head branch that base is, or None when the base
+    is a branch with no open PR of its own -- already the dangerous state, since
+    nothing is left to merge in the right order.
+    """
+    by_branch = {pr.branch: pr for pr in prs if pr.branch}
+    return [
+        (pr, by_branch.get(pr.base)) for pr in prs if pr.base and pr.base != default and pr.branch
+    ]
+
+
+def stack_lines(prs: list[PullRequest], default: str) -> list[str]:
+    """One line per stacked PR, naming the merge order that keeps it alive.
+
+    Stated as an instruction rather than an observation: the failure is not
+    "nobody noticed the stack", it is noticing and merging the parent anyway.
+    """
+    lines: list[str] = []
+    for child, parent in stacked(prs, default):
+        parent_ref = f"#{parent.number}" if parent else f"'{child.base}'"
+        lines.append(
+            f"  STACKED: #{child.number} is based on {parent_ref}, not {default} — "
+            f"merge #{child.number} BEFORE {parent_ref}, or switch its base to {default} "
+            f"once {parent_ref} lands. Merging {parent_ref} first drops #{child.number}."
+        )
+    return lines
 
 
 def slug_for(repo: str) -> str | None:
@@ -191,6 +229,7 @@ def report(repo: str) -> list[str]:
         if prs:
             lines.append(f"{len(prs)} open pull request(s) on {slug}:")
             lines.extend(f"  {pr.line()}" for pr in prs)
+            lines.extend(stack_lines(prs, git.default_branch(repo_path(repo))))
 
     branches = local_worktrees(repo)
     if branches:

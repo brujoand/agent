@@ -85,6 +85,23 @@ by git ancestry. Overrides (human, rare) are `AGENT_ALLOW_PRIMARY_WRITE=1` and
 checkout on their own branch. They must **not** create worktrees — and the hooks
 never apply there, because they live in `~/.claude`, which CI does not load.
 
+## Never stack a pull request
+
+**A PR's base is the default branch.** Basing one PR on another open PR's branch
+loses it: merges here are squashes with branch deletion, so the parent's commits
+never reach the default branch under their original SHAs, and the child is left
+with a base that no longer exists — GitHub conflicts it or closes it, and the
+work looks merged while having landed nowhere. That has cost three PRs.
+
+If a stack is genuinely unavoidable, the order is not optional: **merge the child
+BEFORE the parent, or switch the child's base to the default branch once the
+parent lands.** Merging parent-first drops the child every time.
+
+`require-unstacked-pr.sh` blocks `gh pr create|edit --base <not-the-default>`;
+override with `AGENT_ALLOW_STACKED_PR=1` and state the merge order in the PR
+body. `agent inflight` (and its session-start hook) reports any stack that
+already exists, so the ordering is visible before either one is merged.
+
 ## Secrets: there is no 1Password here
 
 This host has no `OP_SERVICE_ACCOUNT_TOKEN` and never will. `op` and
