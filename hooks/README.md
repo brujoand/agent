@@ -34,6 +34,38 @@ hook's name in `~/.claude/hooks/` is reported as a conflict and left alone, and
 only settings entries pointing into that directory at a script of *ours* are
 added, updated, or removed. Hand-wired hooks in the same file survive untouched.
 
+## `require-unstacked-pr.sh`
+
+Blocks `gh pr create` / `gh pr edit` when `--base` names anything but the repo's
+default branch.
+
+A stacked PR does not survive its parent being merged. Merges here are **squash**
+merges with branch deletion, so the parent's commits never reach the default
+branch under their original SHAs; the child is left with a base that no longer
+exists, and GitHub either conflicts it or closes it. The work looks merged and
+landed nowhere. Three pull requests were lost that way.
+
+The rule that would have saved them constrains *merge order* — child first, or
+rebase the child onto the default branch once the parent lands — and merge order
+cannot be enforced from a hook, because only the human merges. So this enforces
+the half an agent does control: the stack is never created. Deliberate stacks
+stay reachable with `AGENT_ALLOW_STACKED_PR=1`, and the block message says to put
+the ordering in the PR body, where review can see it. `agent inflight` reports
+the stacks that already exist, which is the other half.
+
+The default branch is read from `origin/HEAD` in the calling checkout, never
+assumed — repos here use both `main` and `master`. Anything unparseable fails
+**open**: no `--base`, no checkout, no `origin/HEAD`, or a command it does not
+recognise all exit 0. `gh api` can set a base too and is deliberately not
+matched; guessing at a REST body inside a shell string would block real work to
+close a gap nobody has hit.
+
+```bash
+echo '{"tool_name":"Bash","cwd":"'"${PWD}"'","tool_input":{"command":"gh pr create --base feat/parent"}}' |
+  hooks/require-unstacked-pr.sh --print
+# block: feat/parent is not main
+```
+
 ## `tmux-title.sh`
 
 Renames the tmux window to a short camelCase summary of the current task — from
@@ -174,6 +206,10 @@ Unlike its two siblings it writes to the **model's** context
 (`hookSpecificOutput.additionalContext`), not to a `systemMessage`. The asymmetry
 is the whole design: the human is not the actor about to open a duplicate PR. An
 agent that cannot see #59 will write #59 again no matter what the terminal says.
+
+It also names any **stack**: an open PR based on another open PR's branch gets a
+`STACKED:` line stating which one has to merge first, because merging the parent
+first drops the child (see `require-unstacked-pr.sh`).
 
 That is a real context cost, so it is bounded — ten PRs, four files each, one
 line apiece, and nothing at all when the repo is quiet. Truncation is always

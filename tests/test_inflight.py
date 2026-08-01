@@ -13,7 +13,7 @@ import pytest
 from agentcli import inflight
 
 
-def _pr(number=1, title="t", branch="b", files=None, total=None):
+def _pr(number=1, title="t", branch="b", files=None, total=None, base="main"):
     files = files if files is not None else []
     return inflight.PullRequest(
         number=number,
@@ -21,6 +21,7 @@ def _pr(number=1, title="t", branch="b", files=None, total=None):
         branch=branch,
         files=files,
         total_files=total if total is not None else len(files),
+        base=base,
     )
 
 
@@ -169,3 +170,48 @@ def test_repo_for_delegates_to_the_freshness_resolver(monkeypatch, tmp_path):
 def test_repo_for_is_none_outside_a_managed_checkout(monkeypatch, tmp_path):
     monkeypatch.setattr(inflight.freshness, "checkout_for", lambda path: None)
     assert inflight.repo_for(tmp_path) is None
+
+
+def test_open_pull_requests_records_the_base_branch(monkeypatch):
+    """Without `baseRefName` a stack is invisible, which is how three PRs were lost."""
+    monkeypatch.setattr(
+        inflight,
+        "_gh_json",
+        lambda args, repo: [
+            {"number": 7, "title": "t", "headRefName": "child", "baseRefName": "parent"}
+        ],
+    )
+    assert inflight.open_pull_requests("o/r")[0].base == "parent"
+
+
+def test_nothing_is_stacked_when_every_pr_targets_the_default():
+    prs = [_pr(1, branch="a"), _pr(2, branch="b")]
+    assert inflight.stacked(prs, "main") == []
+    assert inflight.stack_lines(prs, "main") == []
+
+
+def test_a_pr_based_on_another_open_pr_is_stacked():
+    parent = _pr(63, branch="parent")
+    child = _pr(64, branch="child", base="parent")
+    assert inflight.stacked([parent, child], "main") == [(child, parent)]
+
+
+def test_stack_line_states_the_order_that_keeps_the_child_alive():
+    line = inflight.stack_lines(
+        [_pr(63, branch="parent"), _pr(64, branch="child", base="parent")], "main"
+    )[0]
+    assert "#64" in line and "#63" in line
+    assert "BEFORE" in line
+    assert "switch its base to main" in line
+
+
+def test_a_base_with_no_open_pr_is_still_reported():
+    """The parent already merged or was closed -- the child is orphaned now, not later."""
+    child = _pr(64, branch="child", base="gone")
+    assert inflight.stacked([child], "main") == [(child, None)]
+    assert "'gone'" in inflight.stack_lines([child], "main")[0]
+
+
+def test_master_default_is_not_mistaken_for_a_stack():
+    """Repos here use both `main` and `master`; the default is passed in, never assumed."""
+    assert inflight.stacked([_pr(1, branch="a", base="master")], "master") == []

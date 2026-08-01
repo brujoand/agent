@@ -7,6 +7,18 @@
     "CLAUDE_CONFIG_DIR keeps working.",
     "A script with no entry here is installed but never fires -- add it."
   ],
+  "PreToolUse": [
+    {
+      "matcher": "Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "script": "require-unstacked-pr.sh",
+          "timeout": 10
+        }
+      ]
+    }
+  ],
   "SessionStart": [
     {
       "matcher": "startup|resume|clear",
