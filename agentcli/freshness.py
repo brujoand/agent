@@ -41,7 +41,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from agentcli import git, hooks, rules, settings, skills
+from agentcli import git, hooks, output_styles, rules, settings, skills
 from agentcli.config import repo_path, src_root
 from agentcli.errors import AgentError
 
@@ -101,6 +101,10 @@ def _hooks_drift() -> list[str]:
     return found
 
 
+def _output_styles_drift() -> list[str]:
+    return _per_item(output_styles)
+
+
 def _settings_drift() -> list[str]:
     state = settings.status()
     return [] if state == "ok" else [f"declared keys {state}"]
@@ -115,6 +119,7 @@ TREES = (
     ("skills", skills, _skills_drift, "agent skills install"),
     ("rules", rules, _rules_drift, "agent rules install"),
     ("hooks", hooks, _hooks_drift, "agent hooks install"),
+    ("styles", output_styles, _output_styles_drift, "agent output-styles install"),
     ("settings", settings, _settings_drift, "agent settings install"),
 )
 
