@@ -24,7 +24,7 @@
   "effortLevel": "high",
 
   "autoCompactEnabled": true,
-  "autoCompactWindow": 250000,
+  "autoCompactWindow": 450000,
 
   "env": {
     "CLAUDE_CODE_ENABLE_TELEMETRY": "${AGENT_TELEMETRY_ENABLED}",
