@@ -27,6 +27,7 @@ job), but the convention holds.
 `rules.py` (import the always-on rules in `rules/` into `~/.claude/CLAUDE.md`),
 `hooks.py` (link `hooks/` **and** wire them into `~/.claude/settings.json`),
 `settings.py` (converge the values in `settings/` into `~/.claude/settings.json`),
+`freshness.py` (is the checkout current, and would `agent install` change anything),
 `usage.py` (what drives Claude Code token spend, from the local transcripts),
 `install.py`, `doctor.py`, `creds.py`/`labpass.py`, `config.py`, `errors.py`.
 
@@ -36,6 +37,10 @@ install idempotently, are re-runnable forever, and touch nothing they do not own
 `hooks` key, settings owns the declared value keys and **refuses** to declare
 `hooks`, so the two never contend. Add a new managed setting by adding a key to
 `settings/settings.json` — nothing else.
+
+Adding a **new tree** means adding a line to `freshness.TREES` as well;
+`tests/test_freshness.py` discovers every module exposing `source_dir` + `check`
+and fails if one is unmonitored, so the drift checker cannot itself drift.
 
 `issue_agent/` is the interactive issue/PR agent, run as a flat script in its
 own `/opt/issue-agent` venv: `agent.py` (the wrapper: ASK/DONE marker flow,

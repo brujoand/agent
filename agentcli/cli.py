@@ -5,6 +5,7 @@ import typer
 from agentcli import (
     credential,
     doctor,
+    freshness,
     ghpass,
     github,
     hooks,
@@ -90,6 +91,33 @@ def pull_command() -> None:
 def doctor_command() -> None:
     """Check credentials, token, reachable repos, lab, and credential helpers."""
     raise typer.Exit(doctor.run())
+
+
+@app.command("freshness")
+def freshness_command(
+    fetch: bool = typer.Option(
+        False, "--fetch", help="Fetch first and wait for it, instead of using the refs on disk."
+    ),
+    line: bool = typer.Option(
+        False, "--line", help="One line naming every problem and its fix, for a hook to relay."
+    ),
+) -> None:
+    """Is this host loading the rules, skills and hooks that are on origin?
+
+    Silent and exit 0 when everything is current, one line per problem and exit 1
+    when it is not -- so it composes into a hook or a CI step. The default does
+    not wait on the network: it compares against the refs already fetched and
+    kicks off a background refresh when those have aged out.
+    """
+    found = freshness.drift(max_age=freshness.env_max_age(), fetch=fetch)
+    if line:
+        # The hook relays this verbatim, so the wording lives here and only here.
+        if found:
+            print(freshness.summary(found))
+    else:
+        for item in found:
+            print(f"  {item.label:<10} {item.detail} -- run `{item.fix}`")
+    raise typer.Exit(1 if found else 0)
 
 
 @app.command("usage")

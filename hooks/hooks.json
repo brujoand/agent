@@ -7,6 +7,18 @@
     "CLAUDE_CONFIG_DIR keeps working.",
     "A script with no entry here is installed but never fires -- add it."
   ],
+  "SessionStart": [
+    {
+      "matcher": "startup|resume|clear",
+      "hooks": [
+        {
+          "type": "command",
+          "script": "config-freshness.sh",
+          "timeout": 15
+        }
+      ]
+    }
+  ],
   "UserPromptSubmit": [
     {
       "hooks": [

@@ -1,6 +1,16 @@
 from __future__ import annotations
 
-from agentcli import git, github, hooks, repos, rules, settings, skills, workspace
+from agentcli import (
+    freshness,
+    git,
+    github,
+    hooks,
+    repos,
+    rules,
+    settings,
+    skills,
+    workspace,
+)
 from agentcli.config import DEFAULT_REPO, PRIVATE_ENV, repo_path, src_root
 from agentcli.creds import load_app_creds
 from agentcli.errors import AgentError
@@ -114,6 +124,14 @@ def _check_settings() -> bool:
     return ok
 
 
+# Last, and deliberately after the per-tree probes: those say whether the links
+# point at the checkout, this says whether the checkout is worth pointing at.
+def _check_freshness() -> bool:
+    ok, detail = freshness.check()
+    _line(_OK if ok else _BAD, "fresh", detail)
+    return ok
+
+
 def run() -> int:
     print(f"src root: {src_root()}\n")
     checks = [
@@ -126,6 +144,7 @@ def run() -> int:
         _check_rules,
         _check_hooks,
         _check_settings,
+        _check_freshness,
     ]
     results = [check() for check in checks]
     print()

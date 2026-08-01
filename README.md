@@ -260,6 +260,7 @@ agent rules list                # show each shared rule and whether the import b
 agent hooks install             # link the shared Claude hooks AND wire them into settings.json
 agent hooks list                # show each shared hook, where it is wired, and whether it is linked
 agent install                   # all three of the above at once (--lab to add the lab CLI)
+agent freshness                 # is this host loading what is on origin? silent + exit 0 when yes
 ```
 
 ### Shared Claude skills, rules, and hooks
@@ -270,6 +271,16 @@ all read the same `~/.claude`. All three point at this checkout, so `agent pull`
 fast-forwarding the agent repo updates them in place — no reinstall, no drift.
 `agent doctor` reports on all three, every install is idempotent, and `agent
 install` runs them together for a fresh host.
+
+That same property — links pointing *into* the checkout — is what makes staleness
+silent, so it gets its own check. A checkout behind `origin` resolves every link
+cleanly and every per-tree probe passes while the rules actually loaded are the
+old ones; and pulling alone cannot link a skill or rule that did not exist when
+install last ran. `agent freshness` asks both questions, `agent doctor` carries
+it as the `fresh` row, and the `SessionStart` hook
+[`hooks/config-freshness.sh`](hooks/config-freshness.sh) asks it once per session
+— before the first prompt, which is the last moment the answer can still change
+what the session does.
 
 | | `skills/` | `rules/` | `hooks/` |
 |---|---|---|---|
