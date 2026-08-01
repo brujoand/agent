@@ -88,7 +88,9 @@ def pull_command(
     here: bool = typer.Option(
         False, "--here", help="Only the checkout containing this directory, not every repo."
     ),
-    path: str = typer.Option(None, "--path", help="Directory to resolve for --here (default: cwd)."),
+    path: str = typer.Option(
+        None, "--path", help="Directory to resolve for --here (default: cwd)."
+    ),
 ) -> None:
     """Clone or fast-forward every reachable repo into the agent root.
 

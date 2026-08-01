@@ -181,7 +181,7 @@ def test_sync_here_fast_forwards_a_behind_checkout(managed):
     _commit_on_origin(origin, "2")
 
     message = freshness.sync_here(path)
-    assert "demo: pulled 1 commit from origin/main" == message
+    assert message == "demo: pulled 1 commit from origin/main"
     assert (path / "seed").read_text() == "2"
 
 
