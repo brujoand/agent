@@ -115,3 +115,37 @@ their own `SessionStart`, so the hook exits early when the payload carries an
 echo '{"source":"startup"}' | hooks/config-freshness.sh --print
 # (empty when current; one line naming the drift and the fix when not)
 ```
+
+## `config-freshness.sh` vs `repo-freshness.sh`
+
+Two hooks on the same event, two different repos. `config-freshness.sh` asks
+whether `~/.claude` is loading what this repo says it should. `repo-freshness.sh`
+asks whether the repo the session is *working in* is current, and pulls it.
+
+## `repo-freshness.sh`
+
+Fast-forwards the checkout the session started in, before it reads anything.
+
+Staying current has two halves and only one was covered. `agent workspace create`
+already fetches and fast-forwards the default branch before cutting a worktree,
+so **implementation** always starts from a fresh `origin/<default>`.
+**Exploration** did not: a session that opens `~/src/<repo>` and starts grepping
+works against whatever was last on disk, which may be days old. A stale tree is
+worse than no tree, because the answers look right.
+
+`agent pull --here` is the whole implementation — one checkout, one fetch,
+`--ff-only`. Three guards make it safe to run unattended: only a clean tree, only
+on the default branch, only fast-forward. A feature branch is skipped silently, a
+dirty tree is reported and left alone, and a diverged branch is reported as not
+fast-forwardable. Worktrees are excluded by construction — they live under
+`~/worktrees/`, outside the src root this resolves against, so a branch with work
+on it is never a candidate.
+
+Silent when there was nothing to do, which is the common case. Subagents inherit
+the session's cwd and would each re-ask the same question, so the hook exits
+early on an `agent_type` payload.
+
+```bash
+echo '{"source":"startup","cwd":"'"$HOME"'/src/agent"}' | hooks/repo-freshness.sh --print
+# demo: pulled 1 commit from origin/main     <- or empty when already current
+```

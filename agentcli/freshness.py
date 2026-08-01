@@ -154,14 +154,15 @@ def refresh(timeout: float = FETCH_TIMEOUT) -> bool:
         return False
 
 
-def behind() -> int | None:
+def behind(path: Path | None = None) -> int | None:
     """Commits on `origin/<default>` that the checkout does not have.
 
-    None when the question cannot be asked at all -- no checkout, or no remote
-    ref yet -- which is a different answer from zero and must not be reported as
-    "current".
+    Defaults to the agent repo, since that is the one whose freshness decides
+    what a session loads. None when the question cannot be asked at all -- no
+    checkout, or no remote ref yet -- which is a different answer from zero and
+    must not be reported as "current".
     """
-    path = repo()
+    path = path or repo()
     if not git.is_checkout(path):
         return None
     default = git.default_branch(path)
@@ -174,6 +175,73 @@ def behind() -> int | None:
         return int(result.stdout.strip())
     except ValueError:
         return None
+
+
+def checkout_for(path: Path) -> Path | None:
+    """The managed primary checkout `path` sits in, or None.
+
+    Only the flat `~/src/<repo>` layout counts. Worktrees live under
+    `~/worktrees/`, so they fall outside `src_root()` and are excluded by
+    construction -- which is the behaviour wanted: a worktree is on a feature
+    branch with work on it, and nothing here may move that.
+    """
+    root = src_root()
+    try:
+        relative = Path(path).resolve().relative_to(root.resolve())
+    except (ValueError, OSError):
+        return None
+    if not relative.parts:
+        return None
+    candidate = root / relative.parts[0]
+    return candidate if git.is_checkout(candidate) else None
+
+
+def sync_checkout(path: Path, timeout: float = FETCH_TIMEOUT) -> str:
+    """Fast-forward a primary checkout to origin. Returns a line to show, or "".
+
+    This is the *explore* half of staying current: `agent workspace create`
+    already fetches and rebases the default branch before it cuts a worktree, so
+    implementation always starts fresh. Reading does not -- a session that opens
+    `~/src/<repo>` and starts grepping works against whatever was last on disk.
+
+    Three guards, and they are the reason this is safe to run unattended: only a
+    clean tree, only on the default branch, and only `--ff-only`. Any local work,
+    any feature branch, any divergence, and it declines and says so rather than
+    touching anything. Agents cannot write to these checkouts anyway (a PreToolUse
+    hook blocks it), so in practice the clean-tree guard holds trivially -- it is
+    there for the human sharing the machine.
+    """
+    if not git.is_checkout(path):
+        return ""
+    name = path.name
+    try:
+        default = git.default_branch(path)
+        if git.current_branch(path) != default:
+            return ""
+        if git.is_dirty(path):
+            return f"{name}: has uncommitted changes, not pulling"
+        git.run(["-C", str(path), "fetch", "--quiet", "origin"], timeout=timeout)
+    except AgentError:
+        # Offline, or a repo that cannot answer. Nothing to say: a machine
+        # without a network is not a machine with a problem to report.
+        return ""
+
+    count = behind(path)
+    if not count:
+        return ""
+    result = git.run(
+        ["-C", str(path), "merge", "--ff-only", "--quiet", f"origin/{default}"], check=False
+    )
+    plural = "commit" if count == 1 else "commits"
+    if result.returncode != 0:
+        return f"{name}: {count} {plural} behind origin/{default}, not fast-forwardable"
+    return f"{name}: pulled {count} {plural} from origin/{default}"
+
+
+def sync_here(path: Path | None = None) -> str:
+    """Bring the checkout containing `path` (default: cwd) up to date."""
+    checkout = checkout_for(path or Path.cwd())
+    return sync_checkout(checkout) if checkout else ""
 
 
 def tree_drift() -> list[Drift]:

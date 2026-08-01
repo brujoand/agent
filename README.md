@@ -261,6 +261,7 @@ agent hooks install             # link the shared Claude hooks AND wire them int
 agent hooks list                # show each shared hook, where it is wired, and whether it is linked
 agent install                   # all three of the above at once (--lab to add the lab CLI)
 agent freshness                 # is this host loading what is on origin? silent + exit 0 when yes
+agent pull --here               # fast-forward just the checkout containing this directory
 ```
 
 ### Shared Claude skills, rules, and hooks
@@ -281,6 +282,15 @@ it as the `fresh` row, and the `SessionStart` hook
 [`hooks/config-freshness.sh`](hooks/config-freshness.sh) asks it once per session
 — before the first prompt, which is the last moment the answer can still change
 what the session does.
+
+The repo being *worked on* has the same problem, one layer out.
+`agent workspace create` already fetches and fast-forwards the default branch
+before cutting a worktree, so implementation starts fresh — but exploration did
+not, and a session that opens `~/src/<repo>` and starts grepping reads whatever
+was last on disk. `agent pull --here` fast-forwards that one checkout, and
+[`hooks/repo-freshness.sh`](hooks/repo-freshness.sh) runs it at session start.
+Clean tree, default branch, `--ff-only`, worktrees excluded: a feature branch
+with work on it is never a candidate.
 
 | | `skills/` | `rules/` | `hooks/` |
 |---|---|---|---|

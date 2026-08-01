@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 
 from agentcli import (
@@ -82,8 +84,23 @@ def repos_command() -> None:
 
 
 @app.command("pull")
-def pull_command() -> None:
-    """Clone or fast-forward every reachable repo into the agent root."""
+def pull_command(
+    here: bool = typer.Option(
+        False, "--here", help="Only the checkout containing this directory, not every repo."
+    ),
+    path: str = typer.Option(None, "--path", help="Directory to resolve for --here (default: cwd)."),
+) -> None:
+    """Clone or fast-forward every reachable repo into the agent root.
+
+    `--here` is the narrow form a session start can afford: one checkout, one
+    fetch, fast-forward only, and silent when there is nothing to say. It
+    declines on a dirty tree or a feature branch rather than touching them.
+    """
+    if here:
+        message = freshness.sync_here(Path(path) if path else None)
+        if message:
+            print(message)
+        raise typer.Exit(0)
     raise typer.Exit(pull.run())
 
 
