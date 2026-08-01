@@ -15,6 +15,11 @@
           "type": "command",
           "script": "config-freshness.sh",
           "timeout": 15
+        },
+        {
+          "type": "command",
+          "script": "repo-freshness.sh",
+          "timeout": 25
         }
       ]
     }

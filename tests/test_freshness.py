@@ -33,6 +33,8 @@ def checkout(monkeypatch, tmp_path):
 
     clone = tmp_path / "clone"
     _git("clone", "-q", str(origin), str(clone))
+    _git("config", "user.email", "t@example.com", cwd=clone)
+    _git("config", "user.name", "t", cwd=clone)
     monkeypatch.setattr(freshness, "repo", lambda: clone)
     return clone, origin
 
@@ -152,6 +154,95 @@ def test_tree_drift_reports_an_unlinked_member(monkeypatch, tmp_path):
     found = {d.label: d for d in freshness.tree_drift()}
     assert "newone" in found["skills"].detail
     assert found["skills"].fix == "agent skills install"
+
+
+# --- sync_here: the explore half -------------------------------------------
+#
+# `agent workspace create` already fetches and fast-forwards before it cuts a
+# worktree, so implementation starts fresh. These cover the case that had
+# nothing: a session that opens a checkout and starts reading.
+
+
+@pytest.fixture
+def managed(monkeypatch, tmp_path, checkout):
+    """The clone from `checkout`, placed where src_root() will find it."""
+    clone, origin = checkout
+    root = tmp_path / "src"
+    root.mkdir()
+    managed_path = root / "demo"
+    clone.rename(managed_path)
+    monkeypatch.setenv("AGENT_SRC_ROOT", str(root))
+    monkeypatch.setattr(freshness, "repo", lambda: managed_path)
+    return managed_path, origin
+
+
+def test_sync_here_fast_forwards_a_behind_checkout(managed):
+    path, origin = managed
+    _commit_on_origin(origin, "2")
+
+    message = freshness.sync_here(path)
+    assert "demo: pulled 1 commit from origin/main" == message
+    assert (path / "seed").read_text() == "2"
+
+
+def test_sync_here_is_silent_when_already_current(managed):
+    path, _ = managed
+    assert freshness.sync_here(path) == ""
+
+
+def test_sync_here_finds_the_checkout_from_a_subdirectory(managed):
+    path, origin = managed
+    _commit_on_origin(origin, "2")
+    nested = path / "deep" / "deeper"
+    nested.mkdir(parents=True)
+
+    assert "pulled 1 commit" in freshness.sync_here(nested)
+
+
+def test_sync_here_declines_on_a_feature_branch(managed):
+    path, origin = managed
+    _commit_on_origin(origin, "2")
+    _git("checkout", "-qb", "feat/mine", cwd=path)
+
+    assert freshness.sync_here(path) == ""
+    assert (path / "seed").read_text() == "1\n"  # still the pre-fetch content
+
+
+def test_sync_here_declines_on_a_dirty_tree(managed):
+    path, origin = managed
+    _commit_on_origin(origin, "2")
+    (path / "seed").write_text("local edit\n")
+
+    message = freshness.sync_here(path)
+    assert "uncommitted changes" in message
+    assert (path / "seed").read_text() == "local edit\n"
+
+
+def test_sync_here_reports_a_diverged_branch_without_touching_it(managed):
+    path, origin = managed
+    _commit_on_origin(origin, "2")
+    (path / "local").write_text("mine\n")
+    _git("add", "-A", cwd=path)
+    _git("commit", "-qm", "local work", cwd=path)
+
+    message = freshness.sync_here(path)
+    assert "not fast-forwardable" in message
+    assert (path / "local").is_file()
+
+
+def test_sync_here_ignores_a_path_outside_the_src_root(managed, tmp_path):
+    assert freshness.sync_here(tmp_path / "elsewhere") == ""
+
+
+def test_checkout_for_excludes_worktrees(managed, tmp_path):
+    """Worktrees live outside the src root, so they can never be a candidate --
+    which is the guard that keeps a feature branch with work on it untouched."""
+    path, _ = managed
+    worktree = tmp_path / "worktrees" / "demo" / "session-x"
+    worktree.parent.mkdir(parents=True)
+    _git("worktree", "add", "-q", "-b", "feat/x", str(worktree), cwd=path)
+
+    assert freshness.checkout_for(worktree) is None
 
 
 # The point of this one: a new distribution tree that nobody adds to TREES would
