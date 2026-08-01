@@ -334,10 +334,20 @@ def test_shipped_declaration_is_valid_and_declares_the_cost_controls():
 
     assert declared["effortLevel"] in ("low", "medium", "high", "xhigh")
     assert declared["autoCompactEnabled"] is True
-    # The hook's fallback budget and this window must agree, or the hook warns
-    # about a compaction threshold that is not the real one.
-    assert declared["autoCompactWindow"] == 250_000
+    assert declared["autoCompactWindow"] > 0
     assert not set(declared) & set(settings.RESERVED_KEYS)
+
+
+def test_the_hook_fallback_budget_tracks_the_declared_window():
+    """The hook's fallback and the declared window must agree, or a host that has
+    not applied the setting yet is warned against a threshold that is not the
+    real one. Asserted as agreement between the two files rather than against a
+    literal, so tuning the window stays a one-line change."""
+    declared = json.loads(REAL_DECLARATION.read_text())["autoCompactWindow"]
+    hook = (REAL_DECLARATION.parent.parent / "hooks" / "context-budget.sh").read_text()
+    match = re.search(r"^readonly DEFAULT_BUDGET=(\d+)$", hook, re.MULTILINE)
+    assert match, "context-budget.sh no longer declares DEFAULT_BUDGET"
+    assert int(match.group(1)) == declared
 
 
 def test_shipped_declaration_carries_no_host_specific_values():

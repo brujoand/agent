@@ -31,9 +31,11 @@
 # <budget>` and touches no state.
 set -e
 
-# Only consulted when settings.json has no autoCompactWindow. 250k is the
-# standard 200k window plus headroom, not a tuned value -- tune the setting.
-readonly DEFAULT_BUDGET=250000
+# Only consulted when settings.json has no autoCompactWindow. It tracks the value
+# declared in settings/settings.json -- a test asserts the two agree, so a host
+# that has not applied the setting yet is warned against the same threshold as
+# one that has. Tune the setting, not this.
+readonly DEFAULT_BUDGET=450000
 
 # Fractions of the budget that trigger each level. `warn` is early enough that
 # clearing still saves a meaningful number of turns; `high` means compaction is
