@@ -90,6 +90,24 @@ def default_branch(repo: Path) -> str:
     return ref.removeprefix("refs/remotes/origin/") if ref else "main"
 
 
+def slug(repo: Path) -> str | None:
+    """`owner/name` from the checkout's origin remote, or None.
+
+    Read from the remote rather than the directory name, so a renamed or
+    differently-named local checkout still resolves to the right repository.
+    Handles both URL forms git uses here: `https://host/owner/name[.git]` and
+    `git@host:owner/name[.git]`.
+    """
+    url = run(["-C", str(repo), "remote", "get-url", "origin"], check=False).stdout.strip()
+    if not url:
+        return None
+    url = url.removesuffix(".git")
+    if url.startswith("git@"):
+        url = url.split(":", 1)[-1]
+    parts = [p for p in url.split("/") if p]
+    return "/".join(parts[-2:]) if len(parts) >= 2 else None
+
+
 def is_dirty(repo: Path) -> bool:
     return bool(run(["-C", str(repo), "status", "--porcelain"]).stdout.strip())
 

@@ -152,6 +152,47 @@ echo '{"source":"startup"}' | hooks/config-freshness.sh --print
 # (empty when current; one line naming the drift and the fix when not)
 ```
 
+## `worktree-gc.sh`
+
+Collects spent session worktrees at session start, including `/clear`.
+
+A worktree is spent the moment its PR merges — the branch can take no further
+work, because pushing to it does not reopen a merged PR. Nobody deletes it at
+that moment: the session that would have is the session that just finished. So
+they pile up, and a host carrying a dozen stale worktrees makes `agent workspace
+list` useless for the one job it has, which is saying what is still live.
+
+`/clear` is the right trigger because it is the task boundary — the moment a
+session stops being about what it was about. Startup and resume get it too, since
+a host left alone overnight has the same pile waiting.
+
+`agent workspace gc` is the whole implementation, and it now collects on two
+signals rather than one: **PR merged** (immediately — the worktree is spent) or
+**idle past the window** (24h, for work that was simply abandoned). It never
+forces; git's own refusal to remove a worktree with uncommitted changes is what
+protects unfinished work, and branches are left intact so committed-but-unpushed
+commits stay reachable. A worktree with a live process anchored to it — including
+the session doing the collecting — is never touched.
+
+Merged state costs one API call per repo that *has* worktrees, and none for a
+repo that does not. If GitHub cannot answer, the age rule alone still applies,
+which is exactly the behaviour before this existed.
+
+Output is a `systemMessage`, so what was deleted reaches the human and not the
+model's context. Silent when nothing was collected. `AGENT_WORKTREE_GC=0` opts a
+session out.
+
+```bash
+echo '{"source":"clear"}' | hooks/worktree-gc.sh --print
+# Collected 2 spent session worktree(s):
+# gc: removed session-stacked-pr-guard (merged)
+# gc: removed session-old-thing (idle)
+```
+
+`--print` still performs the collection — it changes how the result is reported,
+not whether it happens. Point `HOME` somewhere scratch if that is not what you
+want.
+
 ## `config-freshness.sh` vs `repo-freshness.sh`
 
 Two hooks on the same event, two different repos. `config-freshness.sh` asks

@@ -182,26 +182,8 @@ def stack_lines(prs: list[PullRequest], default: str) -> list[str]:
 
 
 def slug_for(repo: str) -> str | None:
-    """`owner/repo` from the checkout's origin remote, or None."""
-    checkout = repo_path(repo)
-    try:
-        result = subprocess.run(  # noqa: S603
-            ["git", "-C", str(checkout), "remote", "get-url", "origin"],  # noqa: S607
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        return None
-    url = result.stdout.strip()
-    if not url:
-        return None
-    url = url.removesuffix(".git")
-    if url.startswith("git@"):
-        url = url.split(":", 1)[-1]
-    parts = [p for p in url.split("/") if p]
-    return "/".join(parts[-2:]) if len(parts) >= 2 else None
+    """`owner/repo` for a managed repo name, or None. See `git.slug`."""
+    return git.slug(repo_path(repo))
 
 
 def local_worktrees(repo: str) -> list[str]:
