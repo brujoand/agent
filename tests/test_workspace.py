@@ -114,3 +114,112 @@ def test_default_branch_falls_back_to_main(monkeypatch, tmp_path):
         lambda args, cwd=None, check=True: type("R", (), {"stdout": "", "returncode": 1})(),
     )
     assert workspace.git.default_branch(tmp_path) == "main"
+
+
+class _Response:
+    """Minimal stand-in for the httpx response `github.api_get` returns."""
+
+    def __init__(self, payload):
+        self._payload = payload
+
+    def json(self):
+        return self._payload
+
+
+def _pull(branch: str, merged: bool):
+    return {"head": {"ref": branch}, "merged_at": "2026-08-01T00:00:00Z" if merged else None}
+
+
+def test_merged_branches_lists_only_what_actually_merged(monkeypatch, tmp_path):
+    """A closed-but-unmerged PR leaves real work on its branch -- never collect it."""
+    monkeypatch.setattr(workspace.git, "slug", lambda path: "o/r")
+    monkeypatch.setattr(workspace, "repo_path", lambda repo: tmp_path)
+    monkeypatch.setattr(
+        workspace.github,
+        "api_get",
+        lambda path, params=None: _Response([_pull("done", True), _pull("abandoned", False)]),
+    )
+    assert workspace.merged_branches("agent") == {"done"}
+
+
+@pytest.mark.parametrize(
+    "boom",
+    [RuntimeError("no credentials"), OSError("offline")],
+)
+def test_merged_branches_is_empty_when_github_cannot_answer(monkeypatch, tmp_path, boom):
+    """gc then falls back to the age rule, which is what it did before this existed."""
+
+    def raise_it(path, params=None):
+        raise boom
+
+    monkeypatch.setattr(workspace.git, "slug", lambda path: "o/r")
+    monkeypatch.setattr(workspace, "repo_path", lambda repo: tmp_path)
+    monkeypatch.setattr(workspace.github, "api_get", raise_it)
+    assert workspace.merged_branches("agent") == set()
+
+
+def test_merged_branches_is_empty_without_a_remote(monkeypatch, tmp_path):
+    monkeypatch.setattr(workspace.git, "slug", lambda path: None)
+    monkeypatch.setattr(workspace, "repo_path", lambda repo: tmp_path)
+    assert workspace.merged_branches("agent") == set()
+
+
+def _collect_setup(monkeypatch, *, in_use=False, branch="feat/x", age=0):
+    monkeypatch.setattr(workspace, "in_use", lambda worktree: in_use)
+    monkeypatch.setattr(workspace.git, "current_branch", lambda path: branch)
+    monkeypatch.setattr(workspace, "age_seconds", lambda worktree: age)
+
+
+def test_a_merged_worktree_is_collectable_immediately(monkeypatch, tmp_path):
+    """Spent the moment the PR merges: pushing to that branch reopens nothing."""
+    _collect_setup(monkeypatch, age=0)
+    assert workspace._collectable(tmp_path, {"feat/x"}) == "merged"
+
+
+def test_an_unmerged_fresh_worktree_is_kept(monkeypatch, tmp_path):
+    _collect_setup(monkeypatch, age=0)
+    assert workspace._collectable(tmp_path, set()) is None
+
+
+def test_an_unmerged_idle_worktree_is_still_collectable(monkeypatch, tmp_path):
+    _collect_setup(monkeypatch, age=workspace.GC_AGE_SECONDS + 1)
+    assert workspace._collectable(tmp_path, set()) == "idle"
+
+
+def test_a_worktree_in_use_is_never_collected(monkeypatch, tmp_path):
+    """Including the session doing the collecting -- it is anchored to its own tree."""
+    _collect_setup(monkeypatch, in_use=True, age=workspace.GC_AGE_SECONDS + 1)
+    assert workspace._collectable(tmp_path, {"feat/x"}) is None
+
+
+def test_gc_reports_why_each_worktree_went(monkeypatch, tmp_path, capsys):
+    spent = tmp_path / "session-spent"
+    spent.mkdir()
+    monkeypatch.setattr(workspace, "managed_repos", lambda: ["agent"])
+    monkeypatch.setattr(workspace, "repo_path", lambda repo: tmp_path)
+    monkeypatch.setattr(workspace.git, "is_checkout", lambda path: True)
+    monkeypatch.setattr(workspace, "session_worktrees", lambda repo: [spent])
+    monkeypatch.setattr(workspace, "merged_branches", lambda repo: {"feat/spent"})
+    monkeypatch.setattr(workspace, "_collectable", lambda worktree, merged: "merged")
+    monkeypatch.setattr(
+        workspace.git, "run", lambda args, cwd=None, check=True: type("R", (), {"returncode": 0})()
+    )
+    monkeypatch.setattr(workspace, "_forget_session_pointers", lambda worktree: None)
+    monkeypatch.setattr(workspace, "prune_session_pointers", lambda: 0)
+
+    assert workspace.gc() == 1
+    assert "gc: removed session-spent (merged)" in capsys.readouterr().out
+
+
+def test_gc_asks_github_nothing_for_a_repo_with_no_worktrees(monkeypatch, tmp_path):
+    """A quiet host must cost no API calls at all -- this runs at every session start."""
+    calls = []
+    monkeypatch.setattr(workspace, "managed_repos", lambda: ["agent"])
+    monkeypatch.setattr(workspace, "repo_path", lambda repo: tmp_path)
+    monkeypatch.setattr(workspace.git, "is_checkout", lambda path: True)
+    monkeypatch.setattr(workspace, "session_worktrees", lambda repo: [])
+    monkeypatch.setattr(workspace, "merged_branches", lambda repo: calls.append(repo) or set())
+    monkeypatch.setattr(workspace, "prune_session_pointers", lambda: 0)
+
+    assert workspace.gc() == 0
+    assert calls == []

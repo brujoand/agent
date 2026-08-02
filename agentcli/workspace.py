@@ -5,7 +5,7 @@ import subprocess
 import time
 from pathlib import Path
 
-from agentcli import git
+from agentcli import git, github
 from agentcli.config import (
     BOT_EMAIL,
     BOT_NAME,
@@ -19,6 +19,10 @@ from agentcli.errors import AgentConfigError, AgentGitError, AgentInputError
 # A session worktree is only auto-purged once it has been idle this long AND no
 # live claude is anchored to it.
 GC_AGE_SECONDS = int(os.environ.get("AGENT_WORKTREE_GC_AGE_SECONDS", 24 * 3600))
+
+# Closed PRs read per repo when deciding what is spent. Sorted by most recently
+# updated, so the window covers far more history than any worktree survives.
+MERGED_PR_PAGE = 50
 
 
 def _checkout(repo: str) -> Path:
@@ -219,10 +223,56 @@ def delete(slug_or_branch: str, repo: str) -> Path:
     return worktree
 
 
-def gc(repo: str | None = None, quiet: bool = False) -> int:
-    """Remove idle session worktrees untouched for longer than the grace period.
+def merged_branches(repo: str) -> set[str]:
+    """Head branches of this repo's merged pull requests.
 
-    Never forces, so a worktree with uncommitted or untracked changes is kept.
+    Empty on any failure -- no credentials, no network, an unexpected body. gc
+    then falls back to the age rule alone, which is the behaviour it had before
+    this existed, so a GitHub outage costs a slower cleanup and nothing else.
+    """
+    slug = git.slug(repo_path(repo))
+    if not slug:
+        return set()
+    try:
+        response = github.api_get(
+            f"/repos/{slug}/pulls",
+            {"state": "closed", "per_page": MERGED_PR_PAGE, "sort": "updated", "direction": "desc"},
+        )
+        data = response.json()
+    except Exception:  # noqa: BLE001 -- every failure here means "fall back to age"
+        return set()
+    if not isinstance(data, list):
+        return set()
+    return {
+        str(item["head"]["ref"])
+        for item in data
+        if isinstance(item, dict) and item.get("merged_at") and isinstance(item.get("head"), dict)
+    }
+
+
+def _collectable(worktree: Path, merged: set[str]) -> str | None:
+    """Why this worktree can go -- "merged" or "idle" -- or None to keep it.
+
+    A worktree whose PR has merged is spent the moment it merges: its branch can
+    take no further work, because pushing to it does not reopen the PR. Waiting
+    out the idle window for those was the whole reason spent worktrees piled up.
+    """
+    if in_use(worktree):
+        return None
+    branch = git.current_branch(worktree)
+    if branch and branch in merged:
+        return "merged"
+    age = age_seconds(worktree)
+    if age is not None and age >= GC_AGE_SECONDS:
+        return "idle"
+    return None
+
+
+def gc(repo: str | None = None, quiet: bool = False) -> int:
+    """Remove session worktrees that are spent: PR merged, or idle past the window.
+
+    Never forces, so a worktree with uncommitted or untracked changes is kept --
+    that refusal, not a check of our own, is what protects unfinished work.
     Branches are left intact, so committed-but-unpushed work stays reachable.
     """
     removed = 0
@@ -230,11 +280,12 @@ def gc(repo: str | None = None, quiet: bool = False) -> int:
     for name in targets:
         if not git.is_checkout(repo_path(name)):
             continue
-        for worktree in session_worktrees(name):
-            if in_use(worktree):
-                continue
-            age = age_seconds(worktree)
-            if age is None or age < GC_AGE_SECONDS:
+        worktrees = session_worktrees(name)
+        # One API call per repo with anything to collect, none for a quiet repo.
+        merged = merged_branches(name) if worktrees else set()
+        for worktree in worktrees:
+            reason = _collectable(worktree, merged)
+            if reason is None:
                 continue
             result = git.run(
                 ["-C", str(repo_path(name)), "worktree", "remove", str(worktree)], check=False
@@ -246,7 +297,7 @@ def gc(repo: str | None = None, quiet: bool = False) -> int:
             _forget_session_pointers(worktree)
             removed += 1
             if not quiet:
-                print(f"gc: removed {worktree.name}")
+                print(f"gc: removed {worktree.name} ({reason})")
         if removed:
             git.run(["-C", str(repo_path(name)), "worktree", "prune"], check=False)
 

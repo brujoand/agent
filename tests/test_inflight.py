@@ -104,27 +104,14 @@ def test_gh_json_returns_none_on_unparseable_output(monkeypatch):
     assert inflight._gh_json(["pr", "list"], "o/r") is None
 
 
-@pytest.mark.parametrize(
-    ("url", "expected"),
-    [
-        ("https://github.com/brujoand/agent.git", "brujoand/agent"),
-        ("https://github.com/brujoand/agent", "brujoand/agent"),
-        ("git@github.com:brujoand/agent.git", "brujoand/agent"),
-    ],
-)
-def test_slug_for_parses_remote_urls(monkeypatch, url, expected):
-    monkeypatch.setattr(
-        inflight.subprocess,
-        "run",
-        lambda *a, **k: subprocess.CompletedProcess(a, 0, url + "\n", ""),
-    )
-    assert inflight.slug_for("agent") == expected
+def test_slug_for_resolves_a_repo_name_through_git(monkeypatch):
+    """The URL parsing itself lives in `git.slug` and is tested there -- one copy."""
+    monkeypatch.setattr(inflight.git, "slug", lambda path: f"brujoand/{path.name}")
+    assert inflight.slug_for("agent") == "brujoand/agent"
 
 
 def test_slug_for_is_none_without_a_remote(monkeypatch):
-    monkeypatch.setattr(
-        inflight.subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, "", "")
-    )
+    monkeypatch.setattr(inflight.git, "slug", lambda path: None)
     assert inflight.slug_for("agent") is None
 
 

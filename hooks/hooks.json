@@ -35,6 +35,11 @@
         },
         {
           "type": "command",
+          "script": "worktree-gc.sh",
+          "timeout": 30
+        },
+        {
+          "type": "command",
           "script": "inflight.sh",
           "timeout": 30
         }
