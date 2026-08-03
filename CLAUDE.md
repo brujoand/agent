@@ -54,9 +54,12 @@ and fails if one is unmonitored, so the drift checker cannot itself drift.
 
 `issue_agent/` is the interactive issue/PR agent, run as a flat script in its
 own `/opt/issue-agent` venv: `agent.py` (the wrapper: ASK/DONE marker flow,
-GitHub polling, usage metrics) and `providers/` (the LLM seam — `base.py`
-protocol + neutral types, `claude.py` Claude Agent SDK adapter, env-driven
-factory via `AGENT_PROVIDER`, default `claude`). Both are ours: lint-covered
+GitHub polling, usage metrics), `tool_policy.py` (what a session may NOT do —
+pure, provider-neutral, deployment-neutral; enforced as SDK deny rules **plus** a
+PreToolUse hook, because `can_use_tool` is skipped for pre-approved tools and
+pattern matching is a permission gate rather than a sandbox), and `providers/`
+(the LLM seam — `base.py` protocol + neutral types, `claude.py` Claude Agent SDK
+adapter, env-driven factory via `AGENT_PROVIDER`, default `claude`). All ours: lint-covered
 and tested from `tests/` (a `conftest.py` shim puts `issue_agent/` on
 `sys.path`, and `claude-agent-sdk` is a dev dep for the adapter tests). Only
 `s3_session_store.py` remains **vendored verbatim** from the Claude Agent SDK

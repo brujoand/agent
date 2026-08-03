@@ -209,12 +209,37 @@ Runtime env / reusable-workflow inputs (all optional unless noted):
 | `model` / `AGENT_MODEL` | `claude-opus-5` | model id passed to the provider |
 | `session_store_endpoint`/`_bucket` + `AWS_*` | *(empty → stateless)* | MinIO/S3 for transcript persistence + cross-timeout resume |
 | `otlp_metrics_endpoint` | *(empty → off)* | OTLP base URL for usage telemetry. The SDK spawns the `claude` CLI with this process's env, so the CLI's own OpenTelemetry exporter reports `claude_code.*` metrics tagged `app.entrypoint=sdk-py` — the same series an interactive session produces. A Prometheus OTLP receiver requires cumulative temporality; the workflow sets it. |
-| `AGENT_BASE_BRANCH` | *(repo default branch)* | PR base branch |
+| `AGENT_BASE_BRANCH` | *(repo default branch)* | PR base branch — and the branch the session is refused permission to push to |
 | `AGENT_PLAYBOOK` | `.claude/commands/triage-and-fix.md` | repo playbook; falls back to a generic one shipped with the agent |
+| `AGENT_EGRESS_ALLOW_HOSTS` | *(empty → github.com only)* | comma-separated hosts `curl`/`wget` may reach. Only relevant with `AGENT_CLUSTER_TOOLS=1`; name your own hosts, none are baked in |
+| `PEM_PATH` | `/run/agent/private-key.pem` | the App key mount — also what the session is refused permission to read |
 
 A repo can tailor the agent by committing its own
 `.claude/commands/triage-and-fix.md` and subagents — the session loads the target
 repo's `CLAUDE.md` and `.claude/`.
+
+### What the session cannot do
+
+Issue bodies and thread comments are attacker-controlled text reaching a model
+that holds an App installation token, so `issue_agent/tool_policy.py` states what
+stays impossible regardless of what that text says: reading the App private key,
+`gh auth`/`gh secret`, dumping the environment, naming a credential in anything
+that could print or transmit it, force-pushing, pushing to the base branch,
+writing outside the checkout, and network egress to any host not allowlisted.
+
+Two layers, because neither suffices. Deny rules (the SDK's `disallowed_tools`)
+are evaluated before allow rules and win unconditionally — but they match command
+*patterns*, and pattern matching is a permission gate, not a sandbox:
+`Bash(gh auth:*)` does not stop `bash -c 'gh auth token'`. So a **PreToolUse
+hook** inspects the raw command and is what actually holds. It is the right
+chokepoint specifically because it fires for calls an allow rule already
+approved — `can_use_tool` does not, which would have made a check placed there
+silently dead for exactly the pre-approved tools that matter.
+
+It is defence in depth against a prompt-injected model, not a sandbox: a
+two-step exfiltration (write a secret to a file, publish the file later) is not
+preventable by inspecting single commands. The real boundary remains an
+ephemeral runner and a short-lived token.
 
 ## CLI reference
 
