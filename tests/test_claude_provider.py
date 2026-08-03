@@ -298,3 +298,59 @@ def test_stateless_provider_never_resumes(monkeypatch):
     assert opts.session_store is None
     assert opts.resume is None
     assert opts.session_id == "sid-1"
+
+
+# --- the PreToolUse guard is wired, and denies in the shape the SDK expects ---
+
+
+def test_options_carry_deny_rules_and_the_guard(monkeypatch):
+    import tool_policy
+
+    session = open_faked_session(monkeypatch, CFG, [])
+    opts = session._client.options
+
+    assert opts.disallowed_tools == tool_policy.DENIED_TOOLS
+    # A deny rule alone is a permission gate, not a sandbox -- the hook is the
+    # half that holds, so its absence must fail the build.
+    assert "PreToolUse" in opts.hooks
+    assert opts.hooks["PreToolUse"][0].hooks, "no PreToolUse callback registered"
+
+
+def test_guard_denies_with_the_sdk_permission_shape():
+    from providers.claude import make_guard
+
+    guard = make_guard("/work")
+    out = anyio.run(
+        guard, {"tool_name": "Bash", "tool_input": {"command": "gh auth token"}}, "id", None
+    )
+
+    specific = out["hookSpecificOutput"]
+    assert specific["hookEventName"] == "PreToolUse"
+    assert specific["permissionDecision"] == "deny"
+    assert "token" in specific["permissionDecisionReason"]
+
+
+def test_guard_allows_ordinary_work():
+    from providers.claude import make_guard
+
+    guard = make_guard("/work")
+    out = anyio.run(
+        guard, {"tool_name": "Bash", "tool_input": {"command": "git status"}}, "id", None
+    )
+    assert out == {}
+
+
+def test_guard_fails_closed_when_the_policy_errors(monkeypatch):
+    # This guard defends a security boundary, unlike the shell hooks that fail
+    # open so a bug never wedges a session. An internal error must DENY.
+    import providers.claude as claude
+
+    def boom(*a, **k):
+        raise RuntimeError("policy exploded")
+
+    monkeypatch.setattr(claude.tool_policy, "denial_reason", boom)
+    guard = claude.make_guard("/work")
+    out = anyio.run(
+        guard, {"tool_name": "Bash", "tool_input": {"command": "git status"}}, "id", None
+    )
+    assert out["hookSpecificOutput"]["permissionDecision"] == "deny"

@@ -17,10 +17,12 @@ import sys
 from pathlib import Path
 from types import TracebackType
 
+import tool_policy
 from claude_agent_sdk import (
     AssistantMessage,
     ClaudeAgentOptions,
     ClaudeSDKClient,
+    HookMatcher,
     ResultMessage,
     TextBlock,
     project_key_for_directory,
@@ -65,6 +67,11 @@ _COMMON_TOOLS = [
 # deliberately lacks), so curling the Service endpoints stays read-only. The PR
 # agent works a checked-out diff on a feature branch and has no business reaching
 # the live cluster, so it does not get these (least privilege per role).
+#
+# `Bash(curl:*)` is a bare binary allowlist: on its own it permits any URL, any
+# method, any body — an exfiltration channel, not a read-only probe. The
+# PreToolUse guard is what makes the comment above true, by refusing any host
+# outside AGENT_EGRESS_ALLOW_HOSTS (see tool_policy).
 _CLUSTER_READ_TOOLS = [
     "Bash(kubectl:*)",
     "Bash(curl:*)",
@@ -92,6 +99,42 @@ def allowed_tools_for(kind: str) -> list[str]:
     if kind == "issue" and os.environ.get("AGENT_CLUSTER_TOOLS") == "1":
         tools += _CLUSTER_READ_TOOLS
     return tools
+
+
+def make_guard(cwd: str):
+    """A PreToolUse hook that refuses what `tool_policy` forbids.
+
+    This is the chokepoint, not `can_use_tool`: a tool call approved by an allow
+    rule or by `acceptEdits` skips `can_use_tool` entirely, so a check placed
+    there would be silently bypassed for exactly the pre-approved tools
+    (`Bash(gh:*)`, `Read`) that matter. A PreToolUse hook runs before permission
+    evaluation and fires for every call.
+
+    Fails CLOSED. The shared shell hooks fail open on purpose -- they guard
+    against accident, and a bug there must never wedge a session. This one
+    guards a security boundary against attacker-controlled text, so an
+    unexpected error denies the call and says why.
+    """
+
+    async def guard(payload, tool_use_id, context):  # noqa: ANN001 - SDK-supplied types
+        try:
+            reason = tool_policy.denial_reason(
+                payload.get("tool_name", ""), payload.get("tool_input") or {}, cwd
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            reason = f"tool policy could not evaluate this call ({exc}); refusing it."
+        if reason is None:
+            return {}
+        print(f"POLICY DENY {payload.get('tool_name', '?')}: {reason}", file=sys.stderr)
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "PreToolUse",
+                "permissionDecision": "deny",
+                "permissionDecisionReason": reason,
+            }
+        }
+
+    return guard
 
 
 def style_dirs() -> list[Path]:
@@ -194,6 +237,9 @@ class ClaudeProvider:
         # nothing. An empty body means the tree was not found: keep the preset,
         # drop the append.
         style = style_body()
+        # Log what is enforced, so a run's constraints are visible in the job
+        # log rather than inferred from the code.
+        print(tool_policy.summarize(), file=sys.stderr)
         system_prompt = {"type": "preset", "preset": "claude_code"}
         if style:
             system_prompt["append"] = style
@@ -204,6 +250,13 @@ class ClaudeProvider:
             system_prompt=system_prompt,
             setting_sources=["project"],  # load CLAUDE.md + .claude/agents/
             allowed_tools=allowed_tools_for(config.kind),
+            # Two layers, and both are needed. Deny rules are evaluated before
+            # allow rules and beat them unconditionally, but they match command
+            # PATTERNS -- and pattern matching is a permission gate, not a
+            # sandbox (`bash -c '...'` walks straight through). The hook
+            # inspects the raw command and is what actually holds.
+            disallowed_tools=tool_policy.DENIED_TOOLS,
+            hooks={"PreToolUse": [HookMatcher(hooks=[make_guard(str(config.cwd))])]},
             # Operate on the checked-out repo (Actions sets GITHUB_WORKSPACE),
             # not the wrapper's own dir.
             cwd=config.cwd,
