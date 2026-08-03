@@ -258,6 +258,121 @@ def test_check_fails_on_conflict(trees):
     assert "conflict" in detail
 
 
+# --- adopting hand-placed hooks ---------------------------------------------
+#
+# A real file at one of our names SHADOWS the tracked script: the hook that
+# fires is the untracked one, silently, while every per-tree probe still passes.
+# That is how the two core guards ran unversioned for weeks.
+
+
+def _shadowed(trees, contents):
+    """A declared hook whose dest slot is occupied by a real file."""
+    src, dest, settings = trees
+    script = _make_hook(src, "tmux-title.sh")
+    _declare(src)
+    dest.mkdir(parents=True)
+    (dest / "tmux-title.sh").write_text(contents)
+    return src, dest, settings, script
+
+
+def test_status_splits_identical_from_edited(trees):
+    src, dest, _ = trees
+    _make_hook(src, "tmux-title.sh")
+    dest.mkdir(parents=True)
+    shadow = dest / "tmux-title.sh"
+
+    shadow.write_text((src / "tmux-title.sh").read_text())
+    assert hooks.status("tmux-title.sh") == "adoptable"
+
+    shadow.write_text("hand-edited\n")
+    assert hooks.status("tmux-title.sh") == "conflict"
+
+
+def test_install_adopts_an_identical_hand_placed_hook(trees):
+    src, dest, _, script = _shadowed(trees, "#!/usr/bin/env bash\nexit 0\n")
+
+    results, _, _ = hooks.install()
+
+    assert "adopted" in dict(results)["tmux-title.sh"]
+    link = dest / "tmux-title.sh"
+    assert link.is_symlink()
+    assert link.resolve() == script.resolve()
+
+
+def test_adopting_is_idempotent(trees):
+    _shadowed(trees, "#!/usr/bin/env bash\nexit 0\n")
+    hooks.install()
+
+    results, _, _ = hooks.install()
+
+    assert dict(results)["tmux-title.sh"] == "ok"
+
+
+def test_an_adopted_hook_is_actually_wired(trees):
+    # The point of adopting is that the TRACKED script starts firing. A symlink
+    # nobody's settings name is still a no-op.
+    _, _, settings, _ = _shadowed(trees, "#!/usr/bin/env bash\nexit 0\n")
+
+    hooks.install()
+
+    wired = json.dumps(_settings(settings))
+    assert "tmux-title.sh" in wired
+
+
+def test_install_refuses_an_edited_hand_placed_hook(trees):
+    _, dest, _, _ = _shadowed(trees, "hand-edited\n")
+
+    results, _, _ = hooks.install()
+
+    assert "SKIP" in dict(results)["tmux-title.sh"]
+    assert (dest / "tmux-title.sh").read_text() == "hand-edited\n"
+
+
+def test_adopt_flag_takes_an_edited_hook_and_keeps_a_backup(trees):
+    _, dest, _, script = _shadowed(trees, "hand-edited\n")
+
+    results, _, _ = hooks.install(adopt=True)
+
+    assert "adopted" in dict(results)["tmux-title.sh"]
+    link = dest / "tmux-title.sh"
+    assert link.is_symlink()
+    assert link.resolve() == script.resolve()
+    # The edits survive -- adoption must never be the thing that loses them.
+    assert (dest / "tmux-title.sh.bak").read_text() == "hand-edited\n"
+
+
+def test_a_second_adoption_does_not_destroy_the_first_backup(trees):
+    _, dest, _, _ = _shadowed(trees, "first\n")
+    hooks.install(adopt=True)
+    # A later hand-placement over the link, adopted again.
+    (dest / "tmux-title.sh").unlink()
+    (dest / "tmux-title.sh").write_text("second\n")
+
+    hooks.install(adopt=True)
+
+    assert (dest / "tmux-title.sh.bak").read_text() == "first\n"
+    assert (dest / "tmux-title.sh.bak.2").read_text() == "second\n"
+
+
+def test_check_names_the_adopt_flag_only_when_it_is_needed(trees):
+    src, dest, _ = trees
+    _make_hook(src, "tmux-title.sh")
+    _declare(src)
+    dest.mkdir(parents=True)
+    shadow = dest / "tmux-title.sh"
+
+    shadow.write_text((src / "tmux-title.sh").read_text())
+    ok, detail = hooks.check()
+    assert ok is False
+    assert "adoptable" in detail
+    assert "--adopt" not in detail  # plain install clears this one
+
+    shadow.write_text("hand-edited\n")
+    ok, detail = hooks.check()
+    assert ok is False
+    assert "--adopt" in detail
+
+
 def test_dest_dir_honors_claude_config_dir(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(tmp_path / "cfg"))
     assert hooks.dest_dir() == tmp_path / "cfg" / "hooks"

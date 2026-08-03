@@ -29,14 +29,24 @@ never sees:
   something happens, which is where a check belongs the moment it can be made
   deterministic. Nothing to remember, nothing to skip.
 
-Install never touches what it does not own: a real file already sitting at a
-hook's name in `~/.claude/hooks/` is reported as a conflict and left alone, and
-only settings entries pointing into that directory at a script of *ours* are
-added, updated, or removed. Hand-wired hooks in the same file survive untouched.
+Install never touches what it does not own: only settings entries pointing into
+`~/.claude/hooks/` at a script of *ours* are added, updated, or removed, and
+hand-wired hooks in the same file survive untouched.
 
-That politeness has a sharp edge: a hand-placed file **shadows** the tracked
-script of the same name, silently. To adopt one, delete the real file first,
-then `agent hooks install` — until then the tracked copy is inert.
+One case does need handling rather than politeness. A hand-placed real file
+**shadows** the tracked script of the same name, silently — the hook that fires
+is the untracked one, while every probe still passes. That is how the two core
+guards ran unversioned for weeks. So install adopts it, split by whether
+anything could be lost:
+
+| Hand-placed file | `agent hooks install` | with `--adopt` |
+|---|---|---|
+| bytes identical to ours | replaced with a link | same |
+| bytes differ | left alone, reported | linked, original kept as `<name>.bak` |
+
+The common case — a copy of a script that later got tracked — needs no flag.
+The case that could destroy work needs an explicit one. Backups are numbered
+(`.bak`, `.bak.2`, …), so adopting twice never overwrites the first.
 
 ## `require-worktree.sh`
 

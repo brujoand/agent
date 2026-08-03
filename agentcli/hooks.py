@@ -19,15 +19,25 @@ Everything else mirrors `skills.py`: the links point at the checkout, so `agent
 pull` updates a hook in place -- no reinstall, no drift -- and anything in
 `~/.claude/hooks/` that is not one of ours is never touched. A hook placed there
 by hand is a real file, not a link into this tree, so pruning skips it by
-construction -- and `status()` reports it as `conflict`, which install declines
-to overwrite.
+construction.
 
-That last property has a sharp edge worth knowing: a hand-placed file SHADOWS
-the tracked script of the same name. `require-worktree.sh` and
+That last property has a sharp edge: a hand-placed file SHADOWS the tracked
+script of the same name. The hook that fires is the untracked one, silently,
+while every per-tree probe still passes. `require-worktree.sh` and
 `require-fresh-branch.sh` lived that way on the reference host for weeks --
 enforcing correctly, but unversioned, unreviewed, and absent from a fresh
-bootstrap. Adopting a hand-placed hook means deleting the real file first, then
-`agent hooks install`; until then the tracked copy is inert.
+bootstrap.
+
+So install ADOPTS rather than skips, split by whether anything could be lost:
+
+- bytes identical to ours -> replaced with a link, unasked. Linking loses
+  nothing, and leaving it shadowed is the worse outcome.
+- bytes differ -> left alone and reported, because the file carries edits we
+  did not make. `--adopt` takes it, keeping the original as `<name>.bak`.
+
+The asymmetry is the point: the common case (a copy of a script that later got
+tracked) needs no flag, and the case that could destroy work needs an explicit
+one.
 """
 
 from __future__ import annotations
@@ -102,20 +112,36 @@ def command_for(name: str) -> str:
         return str(path)
 
 
+def _same_bytes(a: Path, b: Path) -> bool:
+    """Byte-identical contents. False if either side cannot be read."""
+    try:
+        return a.read_bytes() == b.read_bytes()
+    except OSError:
+        return False
+
+
 def status(name: str) -> str:
     """Link state of one hook script in the destination.
 
     ok        -- symlink resolves to our source
     missing   -- nothing there yet
     stale     -- a symlink, but pointing elsewhere (relinked on install)
-    conflict  -- a real file, not a symlink: a hand-managed hook we won't touch
+    adoptable -- a real file whose bytes MATCH ours: install replaces it
+    conflict  -- a real file that differs: hand-managed, needs `--adopt`
+
+    The adoptable/conflict split exists because a real file at one of our names
+    SHADOWS the tracked script silently -- the hook that fires is the untracked
+    one, and every per-tree probe still passes. When the bytes are identical
+    there is nothing to lose by linking, so install does it unasked. When they
+    differ the file carries edits we did not make, so only an explicit
+    `--adopt` (which backs it up first) may touch it.
     """
     link = dest_dir() / name
     src = source_dir() / name
     if link.is_symlink():
         return "ok" if Path(os.path.realpath(link)) == src.resolve() else "stale"
     if link.exists():
-        return "conflict"
+        return "adoptable" if src.is_file() and _same_bytes(link, src) else "conflict"
     return "missing"
 
 
@@ -150,8 +176,26 @@ def _prune(dest: Path) -> list[str]:
     return gone
 
 
-def _link_all(dest: Path) -> list[tuple[str, str]]:
-    """Symlink every shared hook script into dest. Returns (name, outcome)."""
+def _backup_path(link: Path) -> Path:
+    """A `.bak` name beside `link` that does not already exist.
+
+    Numbered rather than overwritten: adopting twice must never destroy the
+    first backup, which may be the only copy of a hand-edited hook.
+    """
+    candidate = link.with_name(link.name + ".bak")
+    n = 2
+    while candidate.exists():
+        candidate = link.with_name(f"{link.name}.bak.{n}")
+        n += 1
+    return candidate
+
+
+def _link_all(dest: Path, adopt: bool = False) -> list[tuple[str, str]]:
+    """Symlink every shared hook script into dest. Returns (name, outcome).
+
+    `adopt` only widens the CONFLICT case (a real file whose contents differ);
+    an identical file is adopted either way, since replacing it loses nothing.
+    """
     results: list[tuple[str, str]] = []
     for script in available():
         name = script.name
@@ -159,8 +203,23 @@ def _link_all(dest: Path) -> list[tuple[str, str]]:
         state = status(name)
         if state == "ok":
             results.append((name, "ok"))
+        elif state == "adoptable":
+            link.unlink()
+            link.symlink_to(script)
+            results.append((name, "adopted: replaced an identical hand-placed file"))
         elif state == "conflict":
-            results.append((name, "SKIP: a non-symlink already exists here"))
+            if not adopt:
+                results.append(
+                    (
+                        name,
+                        "SKIP: a DIFFERENT hand-placed file shadows ours -- `--adopt` to take it",
+                    )
+                )
+                continue
+            backup = _backup_path(link)
+            link.rename(backup)
+            link.symlink_to(script)
+            results.append((name, f"adopted: hand-placed file kept at {backup.name}"))
         else:  # missing or stale -- (re)create the link
             if link.is_symlink():
                 link.unlink()
@@ -293,12 +352,16 @@ def settings_status() -> str:
     return "ok" if render_settings(current, _ours()) == current else "stale"
 
 
-def install() -> tuple[list[tuple[str, str]], str, Path]:
+def install(adopt: bool = False) -> tuple[list[tuple[str, str]], str, Path]:
     """Symlink the shared hooks and wire them into settings. Idempotent.
 
-    Returns (link results, settings outcome, settings path). Never clobbers a
-    real file the user placed in the hooks dir, and only ever adds, updates, or
-    removes settings entries that point into that dir at a script of ours.
+    Returns (link results, settings outcome, settings path). Only ever adds,
+    updates, or removes settings entries that point into the hooks dir at a
+    script of ours.
+
+    A hand-placed real file at one of our names is replaced when its bytes are
+    identical to ours (nothing is lost) and otherwise left alone -- pass
+    `adopt=True` to take that one too, keeping the original as a `.bak`.
     """
     _require_source()
     dest = dest_dir()
@@ -306,7 +369,7 @@ def install() -> tuple[list[tuple[str, str]], str, Path]:
 
     results: list[tuple[str, str]] = [(name, "pruned") for name in _prune(dest)]
     ours = _ours() | {name for name, _ in results}
-    results.extend(_link_all(dest))
+    results.extend(_link_all(dest, adopt=adopt))
 
     current = _read_settings()
     desired = render_settings(current or {}, ours)
@@ -333,10 +396,17 @@ def check() -> tuple[bool, str]:
         return True, f"{src}: none defined"
 
     states = {p.name: status(p.name) for p in scripts}
-    broken = {n: st for n, st in states.items() if st in ("stale", "conflict")}
+    broken = {n: st for n, st in states.items() if st in ("stale", "adoptable", "conflict")}
     if broken:
         detail = ", ".join(f"{n}: {st}" for n, st in sorted(broken.items()))
-        return False, f"{detail} -- run `agent hooks install`"
+        # A conflict is the one state plain install cannot clear, so name the
+        # flag that does rather than sending the reader round the loop again.
+        fix = (
+            "agent hooks install --adopt"
+            if "conflict" in broken.values()
+            else "agent hooks install"
+        )
+        return False, f"{detail} -- run `{fix}`"
 
     linked = sum(1 for st in states.values() if st == "ok")
     wiring = settings_status()
