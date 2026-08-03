@@ -34,6 +34,57 @@ hook's name in `~/.claude/hooks/` is reported as a conflict and left alone, and
 only settings entries pointing into that directory at a script of *ours* are
 added, updated, or removed. Hand-wired hooks in the same file survive untouched.
 
+That politeness has a sharp edge: a hand-placed file **shadows** the tracked
+script of the same name, silently. To adopt one, delete the real file first,
+then `agent hooks install` — until then the tracked copy is inert.
+
+## `require-worktree.sh`
+
+The primary checkouts under `~/src` are read-only for agents. Blocks
+`Edit`/`Write`/`NotebookEdit` and mutating Bash whose target lands inside
+`~/src/<repo>`, for every repo in the workspace. Read-only work there is fine
+and is never blocked.
+
+Resolution handles `git -C <path>`, `cd <path>`, literal `~/src/...` arguments,
+and relative paths against the session cwd; a path naming no checkout (say
+`~/src/CLAUDE.md`) is not a target. Override: `AGENT_ALLOW_PRIMARY_WRITE=1`.
+
+**Known gaps**, both recorded as passing tests in
+`tests/test_require_worktree_hook.py` so closing either flips a test rather than
+changing unpinned behavior:
+
+- The Bash matcher is a verb allowlist (git verbs, `sed -i`, `perl -i`, `tee`).
+  A plain redirection — `cat > ~/src/repo/f <<EOF` — is not matched, so it is
+  allowed. This is the widest accidental path.
+- Target extraction greps the *whole* command string, so text that merely looks
+  like a retarget is treated as one. A commit message mentioning `cd somewhere`
+  contributes "somewhere" as a target; being relative, it resolves against the
+  session cwd — the primary checkout — and blocks. It blocked the commit that
+  added these tests. Safe (it fails toward refusing) but confusing.
+
+## `require-fresh-branch.sh`
+
+Never build on a branch whose PR is already merged or closed. Commits added
+there go nowhere: pushing does not reopen a merged PR, so the work sits on a
+dead branch while looking done.
+
+Merges here are **squash** merges, so the branch tip is not an ancestor of the
+default branch and plain git ancestry misses it. The reliable signal is PR state
+from GitHub, so the hook asks `gh` and caches the answer — MERGED and CLOSED are
+terminal and need no network on a hit; CLEAN carries a 15-minute TTL. A free
+local ancestry check runs first and catches non-squash merges offline.
+
+Fails **open** on infra trouble (no token, offline): a flaky network must not
+wedge the session, and the local check still applies. Override:
+`AGENT_ALLOW_MERGED_BRANCH=1`.
+
+**Known gap:** Bash target extraction understands `git -C` but not `cd`, so
+`cd <worktree> && git commit` falls back to the payload cwd — which, because the
+Bash tool resets cwd to the primary checkout on every call, is usually under
+`~/src` and gets deferred to `require-worktree.sh`. That is the dominant command
+shape on this host, so the guard fires less often than it looks.
+`tests/test_require_fresh_branch_hook.py` records it.
+
 ## `require-unstacked-pr.sh`
 
 Blocks `gh pr create` / `gh pr edit` when `--base` names anything but the repo's

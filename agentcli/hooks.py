@@ -17,9 +17,17 @@ and matcher are reviewed in the same diff as its code.
 
 Everything else mirrors `skills.py`: the links point at the checkout, so `agent
 pull` updates a hook in place -- no reinstall, no drift -- and anything in
-`~/.claude/hooks/` that is not one of ours is never touched. Hooks placed there
-by hand (the worktree and branch-freshness guards, say) are real files, not links
-into this tree, so pruning skips them by construction.
+`~/.claude/hooks/` that is not one of ours is never touched. A hook placed there
+by hand is a real file, not a link into this tree, so pruning skips it by
+construction -- and `status()` reports it as `conflict`, which install declines
+to overwrite.
+
+That last property has a sharp edge worth knowing: a hand-placed file SHADOWS
+the tracked script of the same name. `require-worktree.sh` and
+`require-fresh-branch.sh` lived that way on the reference host for weeks --
+enforcing correctly, but unversioned, unreviewed, and absent from a fresh
+bootstrap. Adopting a hand-placed hook means deleting the real file first, then
+`agent hooks install`; until then the tracked copy is inert.
 """
 
 from __future__ import annotations
