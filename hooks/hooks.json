@@ -9,6 +9,21 @@
   ],
   "PreToolUse": [
     {
+      "matcher": "Edit|Write|NotebookEdit|Bash",
+      "hooks": [
+        {
+          "type": "command",
+          "script": "require-worktree.sh",
+          "timeout": 5
+        },
+        {
+          "type": "command",
+          "script": "require-fresh-branch.sh",
+          "timeout": 20
+        }
+      ]
+    },
+    {
       "matcher": "Bash",
       "hooks": [
         {
