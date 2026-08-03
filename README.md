@@ -36,7 +36,10 @@ It is built from three parts:
 - **Live conversation.** While the job runs it polls the thread and continues
   in-process — reply and it picks up, no re-mention needed. If it hits the job
   timeout it persists the transcript (when a session store is configured) and
-  resumes on your next comment.
+  resumes on your next comment. Only `OWNER`, `MEMBER`, and `COLLABORATOR` are
+  read: the same three associations the workflows require to *start* a run gate
+  who can answer one mid-flight, so a drive-by comment on a public thread cannot
+  steer a session that is already live.
 - **PR review, opt-out.** It reviews every non-draft PR and posts one verification
   comment — **unless** the PR carries an `auto-merge` label. Tag the PRs you are
   auto-merging; everything else is reviewed by default.

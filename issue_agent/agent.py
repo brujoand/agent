@@ -129,6 +129,21 @@ DONE_RE = re.compile(r"<<<DONE>>>(.*?)<<<END_DONE>>>", re.DOTALL)
 # reference deployment's App.
 AGENT_BOT_LOGIN = os.environ.get("AGENT_BOT_LOGIN", "brujoand-agent")
 
+# Who is allowed to speak TO a live session. Deliberately the same three values
+# the reusable workflows require to START one (issue-resume.reusable.yml,
+# pr-agent.reusable.yml) — one authorization policy, enforced at both doors.
+#
+# The workflow `if:` guards only gate job start. Once a session emits <<<ASK>>>
+# the wrapper polls this thread for up to ~49 minutes and feeds the newest
+# comment back in as the user's answer, so without this check any account on the
+# internet can steer a live session on a public repo — past the very guard the
+# workflow just applied. Identity alone (AGENT_BOT_LOGIN) is not enough: it
+# excludes the agent's own comments, not a stranger's.
+#
+# Fail closed. A comment with no association, or one GitHub reports as anything
+# else (CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, NONE), is not a reply we act on.
+AUTHORIZED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
+
 # Abort after this many consecutive errored turns rather than nudge-and-retry
 # until the runtime budget is spent (a misconfig otherwise quietly burns ~49 min).
 _MAX_CONSECUTIVE_ERRORS = 4
@@ -195,14 +210,26 @@ def pr_session_id_for(repo: str, pr: str) -> str:
 
 
 def latest_human_comment(repo: str, issue: str, since_iso: str) -> str | None:
-    """Return the body of the newest human comment after ``since_iso``, else None.
+    """Return the newest AUTHORIZED human comment after ``since_iso``, else None.
 
-    A "human" comment is one NOT authored by the agent App. Every agent comment
-    — wrapper status notes and the model's own `gh` comments alike — is authored
-    by AGENT_BOT_LOGIN (``gh`` reports the bare login, no ``[bot]`` suffix), so
-    excluding that one login guarantees the agent never consumes its own
-    ASK/pause comments as a "reply". Other bots (``github-actions`` etc.) are
-    excluded too, since a bot comment is never the human reply we are polling for.
+    Two independent conditions, both required:
+
+    - **Authorized.** ``authorAssociation`` must be in AUTHORIZED_ASSOCIATIONS.
+      This is the security gate — see that constant. Anyone can comment on a
+      public thread; only these three can answer the agent.
+    - **Not the agent.** Every agent comment — wrapper status notes and the
+      model's own `gh` comments alike — is authored by AGENT_BOT_LOGIN (``gh``
+      reports the bare login, no ``[bot]`` suffix), so excluding that one login
+      guarantees the agent never consumes its own ASK/pause comments as a
+      "reply". Kept even though the App's own association (CONTRIBUTOR on its
+      installation repos) already fails the check above: a misconfigured App
+      that did land an authorized association must still not answer itself.
+
+    Bot comments fail the association check on their own — a bot is never
+    OWNER/MEMBER/COLLABORATOR — so no separate bot-login test is needed. That
+    also closes the old ``endswith("[bot]")`` gap: GraphQL returns App logins
+    bare, so that test never actually matched and a Renovate comment posted
+    after an <<<ASK>>> was consumed as the maintainer's answer.
     """
     raw = gh(
         "issue",
@@ -210,6 +237,8 @@ def latest_human_comment(repo: str, issue: str, since_iso: str) -> str | None:
         issue,
         "--repo",
         repo,
+        # `comments` already carries each comment's `authorAssociation`;
+        # it is NOT a valid top-level field here and adding it errors the call.
         "--json",
         "comments",
     )
@@ -217,14 +246,15 @@ def latest_human_comment(repo: str, issue: str, since_iso: str) -> str | None:
     newest: tuple[str, str] | None = None
     for c in comments:
         author = (c.get("author") or {}).get("login", "")
-        is_agent = author == AGENT_BOT_LOGIN
-        is_bot = author.endswith("[bot]") or author == "github-actions"
-        body = c.get("body", "")
+        if author == AGENT_BOT_LOGIN:
+            continue
+        if (c.get("authorAssociation") or "").upper() not in AUTHORIZED_ASSOCIATIONS:
+            continue
         created = c.get("createdAt", "")
-        if is_agent or is_bot or not created or created <= since_iso:
+        if not created or created <= since_iso:
             continue
         if newest is None or created > newest[0]:
-            newest = (created, body)
+            newest = (created, c.get("body", ""))
     return newest[1] if newest else None
 
 
