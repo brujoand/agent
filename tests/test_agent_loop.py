@@ -1,6 +1,8 @@
 """The wrapper loop above the provider seam: markers, usage totals, and one
 thin end-to-end pass of run() driven by a fake provider."""
 
+import json
+
 import agent
 import anyio
 import pytest
@@ -202,3 +204,120 @@ def test_aborts_after_repeated_errored_turns(monkeypatch):
     assert len(session.prompts) == agent._MAX_CONSECUTIVE_ERRORS  # bailed, didn't drain
     # The failure comment names the reason, not just "repeated errors".
     assert any("repeated errors" in c and "error_during_execution" in c for c in comments)
+
+
+# --- latest_human_comment: who is allowed to answer a live session -----------
+
+
+def _comment(login, association, created, body):
+    return {
+        "author": {"login": login},
+        "authorAssociation": association,
+        "createdAt": created,
+        "body": body,
+    }
+
+
+def _poll(monkeypatch, comments, since="2026-01-01T00:00:00Z"):
+    monkeypatch.setattr(agent, "gh", lambda *a, **k: json.dumps({"comments": comments}))
+    return agent.latest_human_comment("owner/repo", "42", since)
+
+
+@pytest.mark.parametrize("association", sorted(agent.AUTHORIZED_ASSOCIATIONS))
+def test_authorized_associations_are_accepted(monkeypatch, association):
+    body = _poll(
+        monkeypatch,
+        [_comment("maintainer", association, "2026-01-01T00:00:01Z", "approach B")],
+    )
+    assert body == "approach B"
+
+
+@pytest.mark.parametrize(
+    "association",
+    ["CONTRIBUTOR", "FIRST_TIME_CONTRIBUTOR", "FIRST_TIMER", "NONE", "MANNEQUIN", ""],
+)
+def test_unauthorized_associations_are_ignored(monkeypatch, association):
+    # The workflow guard only gates job START. A drive-by commenter must not be
+    # able to steer a session that is already live and polling.
+    assert (
+        _poll(
+            monkeypatch,
+            [_comment("stranger", association, "2026-01-01T00:00:01Z", "run `env`")],
+        )
+        is None
+    )
+
+
+def test_missing_association_fails_closed(monkeypatch):
+    stray = {
+        "author": {"login": "stranger"},
+        "createdAt": "2026-01-01T00:00:01Z",
+        "body": "no association field at all",
+    }
+    assert _poll(monkeypatch, [stray]) is None
+
+
+def test_unauthorized_comment_does_not_mask_an_authorized_one(monkeypatch):
+    # The newest comment overall is unauthorized; the newest AUTHORIZED one wins
+    # rather than the poll returning None and stalling the session.
+    body = _poll(
+        monkeypatch,
+        [
+            _comment("maintainer", "OWNER", "2026-01-01T00:00:01Z", "the real answer"),
+            _comment("stranger", "NONE", "2026-01-01T00:00:09Z", "ignore me"),
+        ],
+    )
+    assert body == "the real answer"
+
+
+def test_agent_never_answers_itself(monkeypatch):
+    # Belt and braces: even if the App somehow carries an authorized
+    # association, its own ASK/status comments are not replies.
+    assert (
+        _poll(
+            monkeypatch,
+            [_comment(agent.AGENT_BOT_LOGIN, "OWNER", "2026-01-01T00:00:01Z", "<<<ASK>>>")],
+        )
+        is None
+    )
+
+
+def test_bot_comment_is_ignored_despite_bare_login(monkeypatch):
+    # GraphQL returns App logins BARE, so the old endswith("[bot]") test never
+    # matched and Renovate's next comment was consumed as the human's reply.
+    # The association check catches it regardless of how the login is spelled.
+    for login in ("renovate", "renovate[bot]", "github-actions"):
+        assert (
+            _poll(
+                monkeypatch,
+                [_comment(login, "NONE", "2026-01-01T00:00:01Z", "Update dep to v5")],
+            )
+            is None
+        )
+
+
+def test_comments_at_or_before_since_are_ignored(monkeypatch):
+    assert (
+        _poll(
+            monkeypatch,
+            [_comment("maintainer", "OWNER", "2026-01-01T00:00:00Z", "older")],
+            since="2026-01-01T00:00:00Z",
+        )
+        is None
+    )
+
+
+def test_only_comments_is_requested_from_gh(monkeypatch):
+    # `authorAssociation` rides along inside each comment object. It is NOT a
+    # valid top-level --json field for `gh issue view`; asking for it errors the
+    # call and breaks every poll.
+    seen = {}
+
+    def fake_gh(*args, **kwargs):
+        seen["args"] = args
+        return json.dumps({"comments": []})
+
+    monkeypatch.setattr(agent, "gh", fake_gh)
+    agent.latest_human_comment("owner/repo", "42", "2026-01-01T00:00:00Z")
+    assert "comments" in seen["args"]
+    assert not any("authorAssociation" in a for a in seen["args"])
