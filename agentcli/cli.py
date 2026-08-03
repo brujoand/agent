@@ -452,15 +452,26 @@ def rules_list() -> None:
 
 
 @hooks_app.command("install")
-def hooks_install() -> None:
+def hooks_install(
+    adopt: bool = typer.Option(
+        False,
+        "--adopt",
+        help="Also replace a hand-placed hook whose contents DIFFER from ours, keeping it as .bak.",
+    ),
+) -> None:
     """Link the shared hooks into ~/.claude/hooks/ AND wire them into settings.json.
 
     Both halves, always: a hook Claude Code's settings do not name never runs, so
     a symlink alone would install a silent no-op. The links point at the agent
     checkout, so `agent pull` keeps them current with no reinstall.
+
+    A hand-placed real file shadows the tracked script of the same name. One
+    that is byte-identical to ours is adopted automatically -- linking it loses
+    nothing. One that differs is left alone until `--adopt`, which keeps the
+    original beside it as `<name>.bak`.
     """
     try:
-        results, outcome, path = hooks.install()
+        results, outcome, path = hooks.install(adopt=adopt)
     except AgentError as err:
         print(f"ERROR: {err}")
         raise typer.Exit(1) from err
@@ -560,6 +571,11 @@ def install_command(
     lab: bool = typer.Option(
         False, "--lab", help="Also install the lab CLI (needs the sibling gitops checkout)."
     ),
+    adopt: bool = typer.Option(
+        False,
+        "--adopt",
+        help="Replace hand-placed hooks whose contents differ from ours, keeping them as .bak.",
+    ),
 ) -> None:
     """Install everything this repo distributes: skills, rules, hooks, styles, settings.
 
@@ -573,7 +589,7 @@ def install_command(
     for label, run in (
         ("skills", lambda: f"{len(skills.install())} linked -> {skills.dest_dir()}"),
         ("rules", lambda: f"block {rules.install()[0]} in {rules.memory_file()}"),
-        ("hooks", lambda: _install_hooks_summary()),
+        ("hooks", lambda: _install_hooks_summary(adopt=adopt)),
         ("styles", lambda: f"{len(output_styles.install())} linked -> {output_styles.dest_dir()}"),
         ("settings", lambda: _install_settings_summary()),
     ):
@@ -604,6 +620,13 @@ def _install_settings_summary() -> str:
     return f"{len(changes)} key(s) in {path}: {detail}"
 
 
-def _install_hooks_summary() -> str:
-    results, outcome, path = hooks.install()
-    return f"{len(results)} linked -> {hooks.dest_dir()}, wiring {outcome} in {path}"
+def _install_hooks_summary(adopt: bool = False) -> str:
+    results, outcome, path = hooks.install(adopt=adopt)
+    summary = f"{len(results)} linked -> {hooks.dest_dir()}, wiring {outcome} in {path}"
+    # A skipped conflict is the one outcome that leaves an untracked hook still
+    # firing, so it must not be summarized away to a count.
+    shadowed = [name for name, state in results if state.startswith("SKIP")]
+    if shadowed:
+        summary += f"\n           SHADOWED (still hand-placed): {', '.join(shadowed)}"
+        summary += "\n           take them with `agent hooks install --adopt`"
+    return summary
