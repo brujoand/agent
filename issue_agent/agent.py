@@ -72,6 +72,12 @@ Environment:
 
 Claude provider only (AGENT_PROVIDER=claude):
   CLAUDE_CODE_OAUTH_TOKEN (required) consumed by the Claude Code CLI the SDK runs
+  AGENT_MAX_BUDGET_USD (optional) default 10.00; spend ceiling for one session.
+                       max_turns bounds a query and MAX_RUNTIME_SECONDS bounds
+                       the clock, but neither bounds money. Checked between
+                       turns, so spend can overshoot by up to one turn. Reaching
+                       it PAUSES (transcript persisted, a reply resumes) rather
+                       than failing. `0` disables the ceiling.
   MINIO_ENDPOINT_URL   (optional) e.g. http://minio.data.svc.cluster.local:80 —
                        enables transcript persistence + resume across the Actions
                        timeout. Omit all MINIO_*/AWS_* to run stateless (a fresh
@@ -147,6 +153,15 @@ AUTHORIZED_ASSOCIATIONS = frozenset({"OWNER", "MEMBER", "COLLABORATOR"})
 # Abort after this many consecutive errored turns rather than nudge-and-retry
 # until the runtime budget is spent (a misconfig otherwise quietly burns ~49 min).
 _MAX_CONSECUTIVE_ERRORS = 4
+
+# Abort after this many consecutive turns that emit NEITHER marker. The error
+# counter above only counts turns the provider reported as errors; a model that
+# keeps working and keeps forgetting to emit <<<ASK>>> or <<<DONE>>> is not an
+# error by that definition, and had no bound at all -- it got nudged until the
+# 49-minute wall clock, at up to MAX_TURNS internal turns per nudge. Generous,
+# because each turn is a whole agentic response: five of them is a model that is
+# not following the protocol, not one that is thinking hard.
+_MAX_CONSECUTIVE_NUDGES = 5
 
 # The @mention handle used to summon the agent onto an unlabelled thread, derived
 # from the App login (e.g. `@brujoand-agent`). Named in status notes so a human
@@ -731,6 +746,7 @@ async def run() -> int:
 
         prompt: str | None = first_prompt
         consecutive_errors = 0
+        consecutive_nudges = 0
         while True:
             if time.monotonic() - started > max_runtime:
                 # Out of budget: the transcript is already mirrored to MinIO by
@@ -779,6 +795,43 @@ async def run() -> int:
                     file=sys.stderr,
                 )
                 usage.record(turn.usage)
+
+            # Out of money. The provider reports this as an errored turn, but it
+            # is not a failure: the work so far is intact and the transcript is
+            # persisted, so this is the same clean pause as the runtime budget
+            # rather than a "the agent broke" comment. Checked BEFORE the error
+            # branch so it never counts toward consecutive_errors.
+            if turn.hit_cost_ceiling():
+                spent = f"${usage.cost_usd:.2f}"
+                pause_note = (
+                    f":moneybag: Paused — this session reached its spend ceiling "
+                    f"({spent}). The work so far is saved. Reply here to resume "
+                    f"(or mention `{AGENT_MENTION}` if this thread isn't labelled "
+                    "`agent`) — I keep full context. Raise `AGENT_MAX_BUDGET_USD` "
+                    "if this issue genuinely needs a longer run."
+                )
+                post_comment(
+                    view_cmd,
+                    issue,
+                    repo,
+                    with_runner_context(
+                        f"{pause_note}\n\n{run_record('paused')}", "Was running in"
+                    ),
+                )
+                if not is_pr:
+                    gh(
+                        "issue",
+                        "edit",
+                        issue,
+                        "--repo",
+                        repo,
+                        "--add-label",
+                        "agent-waiting",
+                        check=False,
+                    )
+                print(f"spend ceiling reached ({spent}); paused", file=sys.stderr)
+                usage.write_job_summary(status="paused")
+                return 0
 
             # Fail fast on a broken loop. If the provider keeps returning errored
             # turns — a wrong/absent token, an unreachable backend, a misconfigured
@@ -858,6 +911,24 @@ async def run() -> int:
             ask = ASK_RE.search(text)
             if not ask:
                 # No marker: nudge the agent to either ask or finish explicitly.
+                # Bounded, unlike before — an unbounded nudge loop burns the full
+                # runtime budget on a model that is not following the protocol.
+                consecutive_nudges += 1
+                if consecutive_nudges >= _MAX_CONSECUTIVE_NUDGES:
+                    note = (
+                        ":warning: **The agent stopped without signalling.** It ran "
+                        f"{consecutive_nudges} turns without emitting a question "
+                        f"(<<<ASK>>>) or completion ({DONE_MARKER}), so I ended the "
+                        "session rather than keep spending. Any work it committed is "
+                        "on its branch; see the run log."
+                    )
+                    post_comment(view_cmd, issue, repo, with_runner_context(note, "Failed in"))
+                    print(
+                        f"aborting: {consecutive_nudges} consecutive turns with no marker",
+                        file=sys.stderr,
+                    )
+                    usage.write_job_summary(status="failed")
+                    return 1
                 prompt = (
                     "You did not emit an <<<ASK>>>...<<<END_ASK>>> block or "
                     f"{DONE_MARKER}. If you need input, ask now using the ASK "
@@ -865,6 +936,9 @@ async def run() -> int:
                     f"{DONE_MARKER}."
                 )
                 continue
+
+            # It signalled properly: the nudge streak is over.
+            consecutive_nudges = 0
 
             question = ask.group(1).strip()
             # Be explicit that a LIVE session is holding open for the answer, so

@@ -354,3 +354,68 @@ def test_guard_fails_closed_when_the_policy_errors(monkeypatch):
         guard, {"tool_name": "Bash", "tool_input": {"command": "git status"}}, "id", None
     )
     assert out["hookSpecificOutput"]["permissionDecision"] == "deny"
+
+
+# --- the spend ceiling -------------------------------------------------------
+
+
+def test_options_carry_the_spend_ceiling(monkeypatch):
+    from providers.claude import DEFAULT_MAX_BUDGET_USD
+
+    monkeypatch.delenv("AGENT_MAX_BUDGET_USD", raising=False)
+    opts = open_faked_session(monkeypatch, CFG, [])._client.options
+    assert opts.max_budget_usd == DEFAULT_MAX_BUDGET_USD
+
+
+def test_spend_ceiling_is_configurable(monkeypatch):
+    monkeypatch.setenv("AGENT_MAX_BUDGET_USD", "2.5")
+    opts = open_faked_session(monkeypatch, CFG, [])._client.options
+    assert opts.max_budget_usd == 2.5
+
+
+def test_spend_ceiling_can_be_disabled(monkeypatch):
+    # An explicit 0 means "bound cost somewhere else", not "use the default".
+    monkeypatch.setenv("AGENT_MAX_BUDGET_USD", "0")
+    opts = open_faked_session(monkeypatch, CFG, [])._client.options
+    assert opts.max_budget_usd is None
+
+
+def test_unparseable_ceiling_falls_back_rather_than_uncapping(monkeypatch):
+    from providers.claude import DEFAULT_MAX_BUDGET_USD, max_budget_usd
+
+    monkeypatch.setenv("AGENT_MAX_BUDGET_USD", "ten dollars")
+    assert max_budget_usd() == DEFAULT_MAX_BUDGET_USD
+
+
+def test_turn_carries_the_raw_subtype(monkeypatch):
+    # The wrapper branches on this, so it must arrive unformatted -- rewording
+    # the human-readable detail must not change control flow.
+    session = open_faked_session(
+        monkeypatch,
+        CFG,
+        [result_message(is_error=True, subtype="error_max_budget_usd", result="over budget")],
+    )
+    turn = anyio.run(session.run_turn, "p")
+
+    assert turn.subtype == "error_max_budget_usd"
+    assert turn.hit_cost_ceiling() is True
+    assert "error_max_budget_usd" in turn.error_detail
+
+
+def test_an_ordinary_error_is_not_a_cost_ceiling(monkeypatch):
+    session = open_faked_session(
+        monkeypatch,
+        CFG,
+        [result_message(is_error=True, subtype="error_during_execution", result="nope")],
+    )
+    turn = anyio.run(session.run_turn, "p")
+
+    assert turn.subtype == "error_during_execution"
+    assert turn.hit_cost_ceiling() is False
+
+
+def test_a_successful_turn_has_no_subtype(monkeypatch):
+    session = open_faked_session(monkeypatch, CFG, [result_message()])
+    turn = anyio.run(session.run_turn, "p")
+    assert turn.subtype == ""
+    assert turn.hit_cost_ceiling() is False

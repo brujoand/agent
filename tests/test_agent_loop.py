@@ -321,3 +321,109 @@ def test_only_comments_is_requested_from_gh(monkeypatch):
     agent.latest_human_comment("owner/repo", "42", "2026-01-01T00:00:00Z")
     assert "comments" in seen["args"]
     assert not any("authorAssociation" in a for a in seen["args"])
+
+
+# --- bounding what a session can spend ---------------------------------------
+
+
+def test_cost_ceiling_pauses_rather_than_failing(monkeypatch):
+    # Out of money is not a crash: the work is intact and resumable, so it gets
+    # the same clean pause as the runtime budget — not a "the agent broke" note.
+    session = FakeSession(
+        [
+            TurnResult(
+                text="",
+                usage=TurnUsage(cost_usd=10.4, num_turns=3),
+                is_error=True,
+                error_detail="error_max_budget_usd: budget exceeded",
+                subtype="error_max_budget_usd",
+            )
+        ]
+    )
+    comments = []
+    code, _ = run_loop(monkeypatch, session, comments)
+
+    assert code == 0  # paused, not failed
+    assert len(comments) == 1
+    assert "spend ceiling" in comments[0]
+    assert "$10.40" in comments[0]
+    assert "Reply here to resume" in comments[0]
+    assert "Run paused" in comments[0]
+
+
+def test_cost_ceiling_does_not_count_as_an_errored_turn(monkeypatch):
+    # It arrives as is_error=True from the provider. If it fell through to the
+    # error counter it would be reported as a failure instead of a pause.
+    session = FakeSession(
+        [
+            TurnResult(
+                text="",
+                usage=TurnUsage(cost_usd=1.0, num_turns=1),
+                is_error=True,
+                error_detail="error_max_budget_usd: budget exceeded",
+                subtype="error_max_budget_usd",
+            )
+        ]
+    )
+    comments = []
+    code, _ = run_loop(monkeypatch, session, comments)
+
+    assert code == 0
+    assert not any("repeated errors" in c for c in comments)
+
+
+def test_an_ordinary_error_is_still_a_failure(monkeypatch):
+    # Guard the branch above: only the budget subtype takes the pause path.
+    session = FakeSession(
+        [
+            TurnResult(
+                text="boom",
+                usage=TurnUsage(num_turns=1),
+                is_error=True,
+                error_detail="error_during_execution: nope",
+                subtype="error_during_execution",
+            )
+            for _ in range(6)
+        ]
+    )
+    comments = []
+    code, _ = run_loop(monkeypatch, session, comments)
+
+    assert code == 1
+    assert any("repeated errors" in c for c in comments)
+
+
+def test_unbounded_nudging_is_bounded(monkeypatch):
+    # A model that keeps working and keeps forgetting to signal is not an
+    # "error", so the error counter never fired and this ran until the 49-minute
+    # wall clock at up to MAX_TURNS internal turns per nudge.
+    session = FakeSession(
+        [
+            TurnResult(text="still thinking, no markers", usage=TurnUsage(num_turns=1))
+            for _ in range(20)
+        ]
+    )
+    comments = []
+    code, _ = run_loop(monkeypatch, session, comments)
+
+    assert code == 1
+    assert len(session.prompts) == agent._MAX_CONSECUTIVE_NUDGES  # bailed, didn't drain
+    assert any("without signalling" in c for c in comments)
+
+
+def test_a_signalled_turn_resets_the_nudge_streak(monkeypatch):
+    # Four silent turns, then a proper ASK, then silence again: the streak
+    # restarts, so this must NOT trip the limit.
+    silent = [TurnResult(text="no markers", usage=TurnUsage(num_turns=1)) for _ in range(4)]
+    asked = TurnResult(text="<<<ASK>>>\nWhich env?\n<<<END_ASK>>>", usage=TurnUsage(num_turns=1))
+    done = TurnResult(text="<<<DONE>>>\nDone.\n<<<END_DONE>>>", usage=TurnUsage(num_turns=1))
+    session = FakeSession([*silent, asked, done])
+
+    comments = []
+    # Don't burn the real 20s poll interval waiting for the stubbed reply.
+    monkeypatch.setenv("POLL_INTERVAL_SECONDS", "0")
+    monkeypatch.setattr(agent, "latest_human_comment", lambda repo, issue, since: "go ahead")
+    code, _ = run_loop(monkeypatch, session, comments)
+
+    assert code == 0
+    assert not any("without signalling" in c for c in comments)

@@ -213,6 +213,20 @@ Runtime env / reusable-workflow inputs (all optional unless noted):
 | `AGENT_PLAYBOOK` | `.claude/commands/triage-and-fix.md` | repo playbook; falls back to a generic one shipped with the agent |
 | `AGENT_EGRESS_ALLOW_HOSTS` | *(empty → github.com only)* | comma-separated hosts `curl`/`wget` may reach. Only relevant with `AGENT_CLUSTER_TOOLS=1`; name your own hosts, none are baked in |
 | `PEM_PATH` | `/run/agent/private-key.pem` | the App key mount — also what the session is refused permission to read |
+| `AGENT_MAX_BUDGET_USD` | `10.00` | spend ceiling for one session; reaching it posts a pause note you can resume from. `0` disables it |
+
+**What bounds a run.** Three limits, and they bound different things: `max_turns`
+(50) caps one query, `MAX_RUNTIME_SECONDS` (~49 min) caps the wall clock, and
+`AGENT_MAX_BUDGET_USD` caps the money — which nothing did before, since 50 turns
+of a frontier model repeated for 49 minutes has no cost limit of its own. The
+ceiling is checked *between* turns, so spend can overshoot by up to one turn.
+
+Reaching it is a **pause, not a failure**: the transcript is persisted and a
+reply resumes with full context, exactly like the runtime budget. That is also
+why the default is a real number rather than unlimited — setting it too low
+costs you a visible pause, leaving it unset costs you a bill nobody sees until
+later. Cumulative spend *across* resumes is still unbounded: each reply starts a
+fresh job with a fresh ceiling.
 
 A repo can tailor the agent by committing its own
 `.claude/commands/triage-and-fix.md` and subagents — the session loads the target

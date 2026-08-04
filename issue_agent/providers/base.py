@@ -65,6 +65,19 @@ class TurnResult:
     # so a failed run says WHY in the log and the failure comment instead of just
     # "err=True". Empty otherwise.
     error_detail: str = ""
+    # The provider's machine-readable terminal reason for the turn, unformatted
+    # (e.g. "error_max_budget_usd", "error_max_turns"). `error_detail` is for
+    # humans and interpolates a message; this is what the wrapper branches on,
+    # so rewording a provider message cannot silently change control flow.
+    subtype: str = ""
+
+    def hit_cost_ceiling(self) -> bool:
+        """Did this turn stop because the session's spend limit was reached?
+
+        Not a failure: the work so far is intact and the session is resumable,
+        so the wrapper pauses rather than reporting an error.
+        """
+        return self.subtype == "error_max_budget_usd"
 
 
 @runtime_checkable

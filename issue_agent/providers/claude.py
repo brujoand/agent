@@ -31,9 +31,42 @@ from s3_session_store import S3SessionStore
 
 from providers.base import SessionConfig, TurnResult, TurnUsage
 
-# Cost ceiling per query; wall-clock MAX_RUNTIME_SECONDS still bounds the
+# Turn ceiling per query; wall-clock MAX_RUNTIME_SECONDS still bounds the
 # whole session.
 MAX_TURNS = 50
+
+# Spend ceiling for one session, in USD. MAX_TURNS bounds a single query and
+# MAX_RUNTIME_SECONDS bounds the wall clock, but neither bounds MONEY: 50 turns
+# of a frontier model, repeated for 49 minutes, has no cost limit at all.
+#
+# Not unlimited-by-default. A run that reaches this stops cleanly and posts a
+# pause note the maintainer can resume from, so the failure mode of setting it
+# too low is a visible pause, while the failure mode of leaving it unset is a
+# bill nobody sees until later.
+DEFAULT_MAX_BUDGET_USD = 10.0
+
+
+def max_budget_usd() -> float | None:
+    """The session spend ceiling, or None when explicitly disabled.
+
+    `AGENT_MAX_BUDGET_USD=0` (or a negative value) turns the ceiling off, for a
+    deployment that would rather bound cost somewhere else. Anything
+    unparseable falls back to the default rather than silently uncapping.
+    """
+    raw = os.environ.get("AGENT_MAX_BUDGET_USD")
+    if raw is None or raw.strip() == "":
+        return DEFAULT_MAX_BUDGET_USD
+    try:
+        value = float(raw)
+    except ValueError:
+        print(
+            f"WARN: AGENT_MAX_BUDGET_USD={raw!r} is not a number; "
+            f"using the ${DEFAULT_MAX_BUDGET_USD:.2f} default",
+            file=sys.stderr,
+        )
+        return DEFAULT_MAX_BUDGET_USD
+    return value if value > 0 else None
+
 
 # House register, shared with the interactive setup.
 #
@@ -243,9 +276,17 @@ class ClaudeProvider:
         system_prompt = {"type": "preset", "preset": "claude_code"}
         if style:
             system_prompt["append"] = style
+        budget = max_budget_usd()
+        if budget is not None:
+            print(f"session spend ceiling: ${budget:.2f}", file=sys.stderr)
         opts = ClaudeAgentOptions(
             model=config.model,
             max_turns=MAX_TURNS,
+            # Checked BETWEEN turns, so spend can overshoot by up to one turn --
+            # a ceiling, not a hard stop. Reaching it ends the turn with
+            # subtype `error_max_budget_usd`, which the wrapper treats as a
+            # pause rather than a failure.
+            max_budget_usd=budget,
             permission_mode="acceptEdits",
             system_prompt=system_prompt,
             setting_sources=["project"],  # load CLAUDE.md + .claude/agents/
@@ -310,10 +351,13 @@ class ClaudeSession:
             is_error = bool(result.is_error)
         # On error, capture WHY: the SDK's subtype (e.g. error_max_turns,
         # error_during_execution) plus any result text. Without this a failed turn
-        # is an opaque "err=True".
+        # is an opaque "err=True". The subtype is carried through UNFORMATTED as
+        # well, because the wrapper branches on it (a budget stop is a pause, not
+        # a failure) and must not have to parse a human-readable string to do so.
         error_detail = ""
+        subtype = ""
         if is_error and result is not None:
-            subtype = getattr(result, "subtype", None) or "unknown"
+            subtype = str(getattr(result, "subtype", None) or "unknown")
             detail = str(getattr(result, "result", "") or "")
             error_detail = f"{subtype}: {detail}".strip(": ").strip()
         return TurnResult(
@@ -322,4 +366,5 @@ class ClaudeSession:
             session_id=session_id,
             is_error=is_error,
             error_detail=error_detail,
+            subtype=subtype,
         )
