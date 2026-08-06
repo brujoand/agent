@@ -1,11 +1,20 @@
 ---
-name: Build agent-runner container
+name: Build agent containers
+
+# Two images from one Dockerfile, one per `--target`:
+#
+#   runner  -> ghcr.io/brujoand/agent-runner     the CI image for the workflows
+#   agent   -> ghcr.io/brujoand/brujoand-agent   what `bagent` launches locally
+#
+# `target` is NOT optional here. With none, docker builds the LAST stage, which
+# would publish the interactive image under the runner's name and break CI.
 
 on:
   push:
     branches: [main]
     paths:
       - Dockerfile
+      - containers/**
       - agent
       - agentcli/**
       - issue_agent/**
@@ -19,6 +28,17 @@ jobs:
     permissions:
       contents: read
       packages: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: runner
+            image: ghcr.io/brujoand/agent-runner
+          - target: agent
+            image: ghcr.io/brujoand/brujoand-agent
+
+    name: ${{ matrix.target }}
 
     steps:
       - name: Checkout
@@ -35,7 +55,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
-          images: ghcr.io/brujoand/agent-runner
+          images: ${{ matrix.image }}
           tags: |
             type=sha,format=long
             type=raw,value=latest
@@ -44,6 +64,7 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7
         with:
           context: .
+          target: ${{ matrix.target }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

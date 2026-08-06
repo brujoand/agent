@@ -67,6 +67,17 @@ examples and excluded from ruff.
 
 `bootstrap.sh` installs an isolated copy into `~/.local/bin` via `uv tool install`.
 
+The `Dockerfile` builds **two** images from two `--target`s: `runner`
+(`ghcr.io/brujoand/agent-runner`, `FROM actions-runner`, the CI image) and
+`agent` (`ghcr.io/brujoand/brujoand-agent`, `FROM ubuntu:24.04`, what `bagent`
+launches). They share pinned versions through global ARGs but not layers — two
+different roots cannot. **`target` is mandatory in the workflow**: with none,
+docker builds the LAST stage, which would publish the interactive image under
+the runner's name and break CI. `containers/agent-entrypoint.sh` links
+`$HOME/.local/bin/agent` at start, because `git.py` persists that absolute path
+into every clone as the credential helper and it does not otherwise exist in the
+image.
+
 ## Commands
 
 ```bash
