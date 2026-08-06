@@ -10,7 +10,9 @@ from agentcli.config import (
     BOT_EMAIL,
     BOT_NAME,
     SESSION_POINTER_DIR,
+    SRC_LAYOUT_OWNER,
     repo_path,
+    src_layout,
     src_root,
     worktree_base,
 )
@@ -164,8 +166,24 @@ def prune_session_pointers() -> int:
 
 
 def managed_repos() -> list[str]:
-    """Every repo checkout under the agent root."""
-    return sorted(p.name for p in src_root().iterdir() if p.is_dir() and git.is_checkout(p))
+    """Every repo checkout under the agent root.
+
+    Names come back fully qualified in the owner-scoped layout, never bare:
+    callers feed these straight into `repo_path()`, and a bare name only resolves
+    while it is unique. Qualifying unconditionally means enumeration still works
+    the day a second owner brings in a colliding repo name, instead of
+    `agent workspace gc` starting to fail on exactly the repo that collided.
+    """
+    root = src_root()
+    if src_layout() != SRC_LAYOUT_OWNER:
+        return sorted(p.name for p in root.iterdir() if p.is_dir() and git.is_checkout(p))
+    return sorted(
+        f"{owner.name}/{repo.name}"
+        for owner in root.iterdir()
+        if owner.is_dir()
+        for repo in owner.iterdir()
+        if repo.is_dir() and git.is_checkout(repo)
+    )
 
 
 def session_worktrees(repo: str) -> list[Path]:

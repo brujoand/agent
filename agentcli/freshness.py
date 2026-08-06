@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agentcli import git, hooks, output_styles, rules, settings, skills
-from agentcli.config import repo_path, src_root
+from agentcli.config import SRC_LAYOUT_OWNER, repo_path, src_layout, src_root
 from agentcli.errors import AgentError
 
 # The repo that owns every distribution tree, so it is the only one whose
@@ -185,19 +185,23 @@ def behind(path: Path | None = None) -> int | None:
 def checkout_for(path: Path) -> Path | None:
     """The managed primary checkout `path` sits in, or None.
 
-    Only the flat `~/src/<repo>` layout counts. Worktrees live under
-    `~/worktrees/`, so they fall outside `src_root()` and are excluded by
-    construction -- which is the behaviour wanted: a worktree is on a feature
-    branch with work on it, and nothing here may move that.
+    Only primary checkouts count. Worktrees live under `~/worktrees/`, so they
+    fall outside `src_root()` and are excluded by construction -- which is the
+    behaviour wanted: a worktree is on a feature branch with work on it, and
+    nothing here may move that.
+
+    The layout decides how deep a checkout sits: one segment below the root when
+    they are flat siblings, two when they are grouped by owner.
     """
     root = src_root()
     try:
         relative = Path(path).resolve().relative_to(root.resolve())
     except (ValueError, OSError):
         return None
-    if not relative.parts:
+    depth = 2 if src_layout() == SRC_LAYOUT_OWNER else 1
+    if len(relative.parts) < depth:
         return None
-    candidate = root / relative.parts[0]
+    candidate = root.joinpath(*relative.parts[:depth])
     return candidate if git.is_checkout(candidate) else None
 
 

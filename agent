@@ -27,8 +27,17 @@ if [[ ! -x ${_VENV_PYTHON} ]]; then
 fi
 
 # Running from a checkout means acting on the tree that checkout lives in --
-# its parent -- whatever `agent` on PATH would default to. The installed copy
+# whatever `agent` on PATH would default to. The installed copy
 # (~/.local/bin/agent) has no such context and falls back to ~/src.
-export AGENT_SRC_ROOT="${AGENT_SRC_ROOT:-$(dirname "${script_dir}")}"
+#
+# How far up that tree is depends on the layout: checkouts are flat siblings by
+# default (<root>/<repo>), and grouped by owner in the container's /mnt/src
+# (<root>/<owner>/<repo>). Getting this wrong points the whole CLI at a root one
+# level too deep, where it finds nothing.
+_src_root="$(dirname "${script_dir}")"
+if [[ ${AGENT_SRC_LAYOUT:-flat} == "owner" ]]; then
+  _src_root="$(dirname "${_src_root}")"
+fi
+export AGENT_SRC_ROOT="${AGENT_SRC_ROOT:-${_src_root}}"
 
 exec "${_VENV_PYTHON}" -m agentcli "$@"

@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from agentcli.errors import AgentConfigError
+
 # The brujoand-agent App creds live here, baked by `lab agent bootstrap` (run by
 # a human with 1Password access). This file is the ENTIRE contract between lab
 # and agent -- never a code path. The agent host has no OP_SERVICE_ACCOUNT_TOKEN
@@ -65,8 +67,63 @@ def src_root() -> Path:
     return Path(override).expanduser().resolve() if override else default_src_root()
 
 
+# How checkouts are arranged under `src_root()`:
+#
+#   flat   <root>/<repo>          the workstation layout, and the default
+#   owner  <root>/<owner>/<repo>  what the container mounts at /mnt/src
+#
+# Owner-scoped exists because /mnt/src is shared with a human who checks out
+# repos from more than one owner, and two owners may use the same repo name.
+# Chosen by env rather than sniffed from disk: a layout inferred from whatever
+# happens to be cloned would silently change meaning as repos are added.
+SRC_LAYOUT_OWNER = "owner"
+
+
+def src_layout() -> str:
+    return os.environ.get("AGENT_SRC_LAYOUT", "flat").strip().lower()
+
+
+def _owner_scoped(root: Path, repo: str) -> Path:
+    """Find `<root>/<owner>/<repo>` for a bare repo name.
+
+    Deliberately the same rule `bagent` applies on the host side of the container
+    boundary: a bare name works while it is unique, and an ambiguous one is
+    refused rather than resolved by directory order. One name, one meaning, from
+    either side of the mount.
+
+    A name matching nothing returns `<root>/<repo>/<repo>` -- a path that cannot
+    exist without the scan above having found it, so it is safely absent, which
+    is exactly what the flat layout yields for a repo that is not cloned yet.
+    Callers already test `.is_dir()` and report "run `agent pull` first"; raising
+    here would turn that into a stack trace.
+    """
+    try:
+        found = sorted(
+            owner / repo for owner in root.iterdir() if owner.is_dir() and (owner / repo).is_dir()
+        )
+    except OSError:
+        found = []
+
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        return root / repo / repo
+    owners = ", ".join(f"{path.parent.name}/{repo}" for path in found)
+    raise AgentConfigError(
+        f"{repo!r} is ambiguous under {root}: {owners}. Name the owner, as `<owner>/{repo}`."
+    )
+
+
 def repo_path(repo: str) -> Path:
-    return src_root() / repo
+    """The checkout for a repo, named bare (`agent`) or qualified (`brujoand/agent`)."""
+    root = src_root()
+    if src_layout() != SRC_LAYOUT_OWNER:
+        # A qualified name still means one directory in the flat layout: the
+        # repo's own. This keeps `agent pull` able to pass a slug in either mode.
+        return root / repo.rsplit("/", 1)[-1]
+    if "/" in repo:
+        return root / repo
+    return _owner_scoped(root, repo)
 
 
 def claude_config_root() -> Path:
@@ -81,7 +138,16 @@ def claude_config_root() -> Path:
 
 
 def worktree_base(repo: str) -> Path:
-    return Path.home() / "worktrees" / repo
+    """Where a repo's session worktrees live.
+
+    Mirrors the checkout's own shape under `src_root()`, so the bare and the
+    qualified name of one repo always land on the same base -- otherwise
+    `workspace create` and `workspace gc` could disagree about where a worktree
+    is depending on how the repo was named on the command line. In the container
+    HOME is the agent's mounted home, so this resolves under it and persists
+    across image rebuilds like the rest of that mount.
+    """
+    return Path.home() / "worktrees" / repo_path(repo).relative_to(src_root())
 
 
 # --- agent-access: step-ca SSH certificates -------------------------------
