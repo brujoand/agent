@@ -33,6 +33,14 @@ job), but the convention holds.
 `usage.py` (what drives Claude Code token spend, from the local transcripts),
 `install.py`, `doctor.py`, `creds.py`/`labpass.py`, `config.py`, `errors.py`.
 
+`bagent.py` is the odd one out and the only module that does **not** run as the
+agent. It is the human-side launcher (`bagent` entry point): it holds no
+credentials, resolves a repo under `/mnt/src/<owner>/<repo>`, and hands it to
+`docker run` with exactly two mounts (`/mnt/src`, and `/mnt/bagent` as the
+agent's `HOME`). Keep it dependency-light — a human installing this package must
+not need App credentials for `bagent` to import, so it imports no other
+`agentcli` module.
+
 The five distribution trees — `skills/`, `rules/`, `hooks/`, `settings/`,
 `output-styles/` — all install idempotently, are re-runnable forever, and touch
 nothing they do not own. `hooks.py` and `settings.py` both write

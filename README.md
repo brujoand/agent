@@ -281,6 +281,61 @@ and as a standalone script baked into the runner image (so it can run before
 
 ---
 
+## `bagent` — running the agent in a container
+
+`agent` and `bagent` are the same package on opposite sides of a container
+boundary. **`agent` runs as the agent**: it holds the App credentials, clones
+repos, mints tokens. **`bagent` runs as you**, holds nothing, and does one thing
+— work out which repo you meant, then hand it to `docker run`.
+
+```bash
+bagent agent                   # Claude Code, in that checkout, in a container
+bagent --shell dotfiles        # a shell instead
+bagent --list                  # what can be launched
+bagent --dry-run agent         # print the docker command, run nothing
+```
+
+It replaces giving the agent its own unix account. Instead of one box-wide user
+with credentials and a shared filesystem, the container sees exactly two paths:
+
+| Path | What it is |
+|---|---|
+| `/mnt/src` | the checkouts, laid out `<owner>/<repo>`, shared with you |
+| `/mnt/bagent` | the agent's `HOME` — App credentials, `~/.claude`, caches |
+
+Nothing else is mounted. `HOME` being a mount rather than an image layer is what
+keeps state across runs while the environment stays disposable: rebuild the
+image and the next session is current. The image is refreshed on first use each
+day (`--pull` forces it, `--no-pull` skips it).
+
+**Completion.** `bagent <TAB>` offers a bare repo name while that name is
+unique, and `owner/repo` once it is not — and when it is not, *both* become
+owner-qualified, so which repo `bagent infra` meant never depends on directory
+order. Typing the repo name still reaches a collision (`in<TAB>` →
+`brujoand/infra`, `someone/infra`), since the name is the part you actually
+know. Install it with `bagent --install-completion`.
+
+**Elevated access is per-invocation.** The default container holds none of your
+credentials. `--with` lends one, read-only, for that session:
+
+```bash
+bagent --with kube infra               # your kubeconfig, read-only
+bagent --with talos --with ssh infra   # repeatable
+bagent --mount /path:/path:ro infra    # ad-hoc
+```
+
+`--with ssh` lends a single key rather than `~/.ssh`, which would also hand over
+every other key and `known_hosts`.
+
+**The boundary is one-directional, and worth stating plainly.** It stops the
+agent reaching your files. It does not stop you reading `/mnt/bagent` — anyone
+who can talk to the Docker daemon is effectively root. That is fine, since it is
+your machine and you provisioned those credentials, but this is containment of
+the agent, not a secret store.
+
+Every path is overridable (`BAGENT_SRC`, `BAGENT_HOME`, `BAGENT_IMAGE`), so
+nothing here is wired to one host.
+
 ## Maintainer host-glue (single-tenant — not part of the reusable tool)
 
 This repo doubles as the maintainer's dev-host CLI, wired to one specific setup:
