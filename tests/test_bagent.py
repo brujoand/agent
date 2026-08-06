@@ -170,6 +170,19 @@ def test_home_is_the_mount_so_state_persists(src, tmp_path):
     assert f"AGENT_SRC_ROOT={src}" in argv
 
 
+def test_the_container_is_told_the_checkouts_are_owner_scoped(src):
+    """Without this the CLI inside applies its flat default and finds nothing.
+
+    The mount is <root>/<owner>/<repo> because it is shared with checkouts that
+    are not the agent's; `discover` above already assumes that shape, so the two
+    halves have to agree.
+    """
+    _checkout(src, "brujoand", "agent")
+    argv = bagent.docker_command(bagent.resolve("agent", bagent.discover(src)))
+
+    assert "AGENT_SRC_LAYOUT=owner" in argv
+
+
 def test_workdir_is_the_resolved_repo(src):
     _checkout(src, "brujoand", "agent")
     repo = bagent.resolve("agent", bagent.discover(src))

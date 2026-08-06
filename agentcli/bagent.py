@@ -254,9 +254,15 @@ def docker_command(
         # persist across runs while the image stays disposable.
         "--env",
         f"HOME={home}",
-        # The agent's own CLI resolves checkouts from here.
+        # The agent's own CLI resolves checkouts from here, and this tree is
+        # shared with a human who checks out repos from more than one owner --
+        # so it is <root>/<owner>/<repo>, not the flat layout the CLI defaults
+        # to. Set here rather than baked into the image because this module is
+        # the thing that knows the shape of the mount it is making.
         "--env",
         f"AGENT_SRC_ROOT={src}",
+        "--env",
+        "AGENT_SRC_LAYOUT=owner",
         "--workdir",
         str(repo.path),
     ]
