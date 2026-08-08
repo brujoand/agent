@@ -9,9 +9,13 @@ from agentcli import git, pull, repos
 
 @pytest.fixture
 def fake_root(tmp_path, monkeypatch):
-    monkeypatch.setattr(pull, "src_root", lambda: tmp_path)
-    monkeypatch.setattr(git, "INSTALLED_AGENT", tmp_path / ".local" / "bin" / "agent")
-    return tmp_path
+    # Set the real override rather than patching `pull.src_root`: `pull` now
+    # resolves destinations through `config.repo_path`, which reads the root
+    # itself, so patching one name would leave the two disagreeing.
+    root = tmp_path.resolve()
+    monkeypatch.setenv("AGENT_SRC_ROOT", str(root))
+    monkeypatch.setattr(git, "INSTALLED_AGENT", root / ".local" / "bin" / "agent")
+    return root
 
 
 def test_agent_repo_is_an_ordinary_sibling(fake_root, monkeypatch):

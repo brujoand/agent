@@ -82,6 +82,15 @@ pre-commit run --files <changed files>
 
 - **`agent` → `lab`, never back.** This repo cannot depend on `lab`, because
   `agent pull` is what puts `lab` on disk in the first place.
+- **Two checkout layouts, chosen by `AGENT_SRC_LAYOUT`**: `flat`
+  (`<root>/<repo>`, the default, what the workstation uses) and `owner`
+  (`<root>/<owner>/<repo>`, for a mount shared with checkouts that are not ours,
+  where two owners may use one repo name). `config.repo_path()` resolves a name
+  against the layout — bare while unique, `<owner>/<repo>` once not — so callers
+  pass names and never build paths. Exactly three places legitimately measure how
+  deep a checkout sits, and all three are layout-aware:
+  `freshness.checkout_for`, `workspace.managed_repos`, and the `./agent`
+  launcher's `AGENT_SRC_ROOT` default. Adding a fourth is the bug to watch for.
 - **`agent` is its own git credential helper.** The helper must point at the
   *installed* copy in `~/.local/bin`, never `./agent` in the checkout — a helper
   living in tracked files is a bootstrap trap (checking out a commit predating it

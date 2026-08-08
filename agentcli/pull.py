@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from agentcli import git, repos
-from agentcli.config import src_root
+from agentcli.config import repo_path, src_root
 from agentcli.errors import AgentError, AgentGitError
 
 
@@ -34,17 +34,21 @@ def run() -> int:
 
     failed: list[str] = []
     for url in urls:
-        name = repos.name(url)
+        # Pass the full `owner/name` slug and let the layout decide: flat drops
+        # the owner, owner-scoped keeps it. `git clone` creates the leading
+        # directory, so a new owner needs no setup.
+        dest = repo_path(repos.slug(url))
+        label = str(dest.relative_to(root))
         # The agent repo is an ordinary sibling now -- cloned, fast-forwarded and
         # helper-asserted like the rest. Safe because the installed CLI is an
         # isolated copy, so updating this checkout cannot pull the CLI out from
         # under the running process.
         try:
-            action = sync_one(url, root / name)
-            print(f"==> {action} {name}")
+            action = sync_one(url, dest)
+            print(f"==> {action} {label}")
         except AgentGitError as exc:
-            print(f"==> skipping {name}: {exc}")
-            failed.append(name)
+            print(f"==> skipping {label}: {exc}")
+            failed.append(label)
 
     if failed:
         print(f"\npull: {len(failed)} repo(s) need attention: {' '.join(failed)}")

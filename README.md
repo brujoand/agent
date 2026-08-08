@@ -289,6 +289,17 @@ sibling `lab` CLI (from the maintainer's GitOps repo), and credentials in
 `~/.bash_private`. These commands assume that layout and **won't run elsewhere
 without edits** — they are not needed to use the issue agent above.
 
+Two environment variables move that tree. `AGENT_SRC_ROOT` changes where it is,
+and `AGENT_SRC_LAYOUT` changes its shape:
+
+| `AGENT_SRC_LAYOUT` | checkouts | for |
+|---|---|---|
+| `flat` (default) | `<root>/<repo>` | a workstation, where every checkout is yours |
+| `owner` | `<root>/<owner>/<repo>` | a mount shared with other checkouts, where two owners may use one repo name |
+
+In `owner` mode a bare repo name works while it is unique and is refused once it
+is not — qualify it as `<owner>/<repo>`. Session worktrees follow the same shape.
+
 ```bash
 agent pull                      # clone/fast-forward every reachable repo into ~/src
 agent workspace create <t>/<s>  # a worktree off fresh origin/<default>
