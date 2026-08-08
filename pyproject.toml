@@ -13,6 +13,10 @@ dependencies = [
 
 [project.scripts]
 agent = "agentcli.__main__:run"
+# The human-side launcher, same package but the opposite side of the container
+# boundary: `agent` runs as the agent and holds credentials, `bagent` runs as
+# the human and holds none.
+bagent = "agentcli.bagent:run"
 
 [build-system]
 requires = ["hatchling"]
